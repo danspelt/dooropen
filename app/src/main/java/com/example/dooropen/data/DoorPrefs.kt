@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.example.dooropen.data
 
 import android.content.Context
