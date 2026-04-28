@@ -65,3 +65,23 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }
+
+val crossDeviceDownloadsDir = File("C:/Users/Dans.minme/CrossDevice/Pixel 7 Pro/storage/Download")
+val debugApkFile = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
+
+val copyDebugApkToCrossDeviceDownloads by tasks.registering(Copy::class) {
+    from(debugApkFile)
+    into(crossDeviceDownloadsDir)
+
+    var targetName: String? = null
+    doFirst {
+        targetName = "dooropen-debug-${System.currentTimeMillis()}.apk"
+    }
+    rename { _ -> targetName ?: "dooropen-debug.apk" }
+
+    onlyIf { crossDeviceDownloadsDir.isDirectory && debugApkFile.get().asFile.isFile }
+}
+
+afterEvaluate {
+    tasks.findByName("assembleDebug")?.finalizedBy(copyDebugApkToCrossDeviceDownloads)
+}

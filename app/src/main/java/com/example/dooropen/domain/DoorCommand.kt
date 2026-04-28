@@ -24,16 +24,30 @@ object DoorCommand {
         data class Failed(val message: String) : PressOutcome()
     }
 
+    private fun prefs(context: Context) =
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     private fun cooldownRemainingMs(context: Context): Long {
-        val sp = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val last = sp.getLong(KEY_LAST_ELAPSED, 0L)
-        val elapsed = android.os.SystemClock.elapsedRealtime() - last
+        val sp = prefs(context)
+        // Migrate/clear old corrupt data from previous elapsedRealtime() version
+        if (sp.contains(KEY_LAST_ELAPSED_LEGACY)) {
+            sp.edit().remove(KEY_LAST_ELAPSED_LEGACY).apply()
+        }
+        val last = sp.getLong(KEY_LAST_WALL_TIME, 0L)
+        if (last == 0L) return 0L
+        val now = System.currentTimeMillis()
+        // Protect against clock changes or corrupted future timestamps
+        if (last > now) {
+            sp.edit().remove(KEY_LAST_WALL_TIME).apply()
+            return 0L
+        }
+        val elapsed = now - last
         return (COOLDOWN_MS - elapsed).coerceAtLeast(0L)
     }
 
     private fun markAttempt(context: Context) {
-        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putLong(KEY_LAST_ELAPSED, android.os.SystemClock.elapsedRealtime())
+        prefs(context).edit()
+            .putLong(KEY_LAST_WALL_TIME, System.currentTimeMillis())
             .apply()
     }
 
