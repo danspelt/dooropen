@@ -59,6 +59,9 @@ fun SettingsScreen(onBack: () -> Unit) {
     var token by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
     var deviceId by remember { mutableStateOf("") }
+    var bleEnabled by remember { mutableStateOf(false) }
+    var bleMac by remember { mutableStateOf("") }
+    var blePassword by remember { mutableStateOf("") }
     var triggerKey by remember { mutableStateOf("") }
     var homeSafety by remember { mutableStateOf(false) }
     var homeSsid by remember { mutableStateOf("") }
@@ -72,6 +75,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             token = DoorPrefs.getToken(context)
             secret = DoorPrefs.getSecret(context)
             deviceId = DoorPrefs.getDeviceId(context)
+            bleEnabled = DoorPrefs.getBleEnabled(context)
+            bleMac = DoorPrefs.getBleMac(context)
+            blePassword = DoorPrefs.getBlePassword(context)
             triggerKey = DoorPrefs.getTriggerKey(context)
             homeSafety = DoorPrefs.getHomeSafetyEnabled(context)
             homeSsid = DoorPrefs.getHomeSsid(context)
@@ -97,6 +103,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             token = token,
             secret = secret,
             deviceId = deviceId,
+            bleEnabled = bleEnabled,
+            bleMac = bleMac,
+            blePassword = blePassword,
             triggerKey = triggerKey,
             homeSafety = homeSafety,
             homeSsid = homeSsid,
@@ -112,7 +121,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         if (homeSafety) {
             list.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-        if (btSafety && android.os.Build.VERSION.SDK_INT >= 31) {
+        if ((btSafety || bleEnabled) && android.os.Build.VERSION.SDK_INT >= 31) {
             list.add(Manifest.permission.BLUETOOTH_CONNECT)
         }
         return list
@@ -212,6 +221,33 @@ fun SettingsScreen(onBack: () -> Unit) {
                 label = { Text(context.getString(R.string.hint_device_id)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
+                enabled = !bleEnabled,
+            )
+            Spacer(Modifier.height(8.dp))
+            RowSwitch(
+                title = context.getString(R.string.ble_mode_title),
+                subtitle = context.getString(R.string.ble_mode_subtitle),
+                checked = bleEnabled,
+                onCheckedChange = { bleEnabled = it },
+            )
+            OutlinedTextField(
+                value = bleMac,
+                onValueChange = { bleMac = it },
+                label = { Text(context.getString(R.string.hint_ble_mac)) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                enabled = bleEnabled,
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = blePassword,
+                onValueChange = { blePassword = it },
+                label = { Text(context.getString(R.string.hint_ble_password)) },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = bleEnabled,
+                singleLine = true,
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -285,6 +321,27 @@ fun SettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = {
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) {
+                            SwitchBotApi.verifyDevice(token.trim(), secret.trim(), deviceId.trim())
+                        }
+                        Toast.makeText(
+                            context,
+                            if (r.ok) context.getString(R.string.verify_device_ok, r.message) else context.getString(
+                                R.string.verify_device_failed,
+                                r.message,
+                            ),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(context.getString(R.string.verify_device))
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
                     if (!SwitchBotLauncher.openSwitchBotApp(context)) {
                         Toast.makeText(context, R.string.switchbot_not_installed, Toast.LENGTH_LONG).show()
                     }
@@ -296,8 +353,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = {
-                    if (token.isBlank() || secret.isBlank() || deviceId.isBlank()) {
+                    if (!bleEnabled && (token.isBlank() || secret.isBlank() || deviceId.isBlank())) {
                         Toast.makeText(context, R.string.open_missing_credentials, Toast.LENGTH_LONG).show()
+                        return@Button
+                    }
+                    if (bleEnabled && bleMac.isBlank()) {
+                        Toast.makeText(context, R.string.blocked_ble_missing_mac, Toast.LENGTH_LONG).show()
                         return@Button
                     }
                     if (homeSafety && homeSsid.isBlank()) {
@@ -316,6 +377,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                             token = token,
                             secret = secret,
                             deviceId = deviceId,
+                            bleEnabled = bleEnabled,
+                            bleMac = bleMac,
+                            blePassword = blePassword,
                             triggerKey = triggerKey,
                             homeSafety = homeSafety,
                             homeSsid = homeSsid,
@@ -340,6 +404,9 @@ private fun persistAndBack(
     token: String,
     secret: String,
     deviceId: String,
+    bleEnabled: Boolean,
+    bleMac: String,
+    blePassword: String,
     triggerKey: String,
     homeSafety: Boolean,
     homeSsid: String,
@@ -355,6 +422,9 @@ private fun persistAndBack(
                 token,
                 secret,
                 deviceId,
+                bleEnabled,
+                bleMac,
+                blePassword,
                 triggerKey,
                 homeSafety,
                 homeSsid,

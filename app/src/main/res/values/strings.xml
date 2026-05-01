@@ -24,6 +24,10 @@
     <string name="hint_token">Open token</string>
     <string name="hint_secret">Secret key</string>
     <string name="hint_device_id">Bot device id</string>
+    <string name="ble_mode_title">Use Bluetooth (no hub)</string>
+    <string name="ble_mode_subtitle">Controls your Bot directly over BLE. Requires MAC address; your phone must be near the Bot.</string>
+    <string name="hint_ble_mac">Bot Bluetooth MAC address (AA:BB:CC:DD:EE:FF)</string>
+    <string name="hint_ble_password">Bot password (optional)</string>
     <string name="hint_trigger_key">Trigger key (Tecla / shortcuts)</string>
     <string name="home_safety_title">Only at home Wi‑Fi</string>
     <string name="home_safety_subtitle">Allow open only when connected to the SSID below (needs location permission on Android 10+).</string>
@@ -38,6 +42,9 @@
     <string name="test_connection">Test connection</string>
     <string name="test_ok">Connection OK</string>
     <string name="test_failed">Connection failed: %1$s</string>
+    <string name="verify_device">Verify device</string>
+    <string name="verify_device_ok">Device OK: %1$s</string>
+    <string name="verify_device_failed">Device check failed: %1$s</string>
     <string name="open_switchbot_app">Open SwitchBot app</string>
     <string name="switchbot_not_installed">SwitchBot app is not installed.</string>
     <string name="button_save">Save</string>
@@ -62,4 +69,5 @@
     <string name="blocked_prefs">Could not read saved credentials.</string>
     <string name="blocked_cooldown">Wait %1$d s before opening again.</string>
     <string name="blocked_not_configured">Open Settings and save your SwitchBot credentials.</string>
+    <string name="blocked_ble_missing_mac">Bluetooth mode is on. Enter the Bot MAC address in Settings.</string>
 </resources>

@@ -7,60 +7,127 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import com.example.dooropen.data.DoorPrefs
+import java.util.Locale
+import java.util.UUID
 
 object DoorFeedback {
 
+    private var tts: TextToSpeech? = null
+    private var ttsInitialized = false
+    private var pendingTts = mutableListOf<Pair<String, () -> Unit>>()
+
+    fun initTts(context: Context) {
+        if (tts != null) return
+        tts = TextToSpeech(context.applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.getDefault()
+                ttsInitialized = true
+                // Play any pending utterances
+                pendingTts.forEach { (text, onDone) ->
+                    speakInternal(text, onDone)
+                }
+                pendingTts.clear()
+            }
+        }
+    }
+
+    private fun speak(context: Context, text: String, onDone: () -> Unit = {}) {
+        initTts(context)
+        if (!ttsInitialized) {
+            pendingTts.add(text to onDone)
+            return
+        }
+        speakInternal(text, onDone)
+    }
+
+    private fun speakInternal(text: String, onDone: () -> Unit) {
+        val utteranceId = UUID.randomUUID().toString()
+
+        // Set up listener for completion before speaking
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(doneId: String?) {
+                if (doneId == utteranceId) {
+                    onDone()
+                }
+            }
+            override fun onError(errorId: String?) {
+                onDone()
+            }
+        })
+
+        if (Build.VERSION.SDK_INT >= 21) {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        } else {
+            @Suppress("DEPRECATION")
+            val params = hashMapOf(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID to utteranceId)
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params)
+        }
+    }
+
+    fun shutdown() {
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+        ttsInitialized = false
+    }
+
     fun playOpeningCue(context: Context) {
         val ctx = context.applicationContext
-        try {
-            if (DoorPrefs.getSoundEnabled(ctx)) {
-                val tone = ToneGenerator(AudioManager.STREAM_ACCESSIBILITY, 70)
-                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
-                    { tone.release() },
-                    200
-                )
-            }
-        } catch (_: Exception) {
-        }
         vibrateShort(ctx, 40L)
+        if (DoorPrefs.getSoundEnabled(ctx)) {
+            speak(ctx, "Opening door")
+        }
+        playTone(ctx, ToneGenerator.TONE_PROP_BEEP, 120, 70)
     }
 
     fun playSuccess(context: Context) {
         val ctx = context.applicationContext
-        try {
-            if (DoorPrefs.getSoundEnabled(ctx)) {
-                val tone = ToneGenerator(AudioManager.STREAM_ACCESSIBILITY, 80)
-                tone.startTone(ToneGenerator.TONE_PROP_ACK, 160)
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
-                    { tone.release() },
-                    220
-                )
-            }
-        } catch (_: Exception) {
-        }
         vibrateShort(ctx, 80L)
+        if (DoorPrefs.getSoundEnabled(ctx)) {
+            speak(ctx, "Door opened")
+        }
+        playTone(ctx, ToneGenerator.TONE_PROP_ACK, 160, 80)
     }
 
-    fun playFailure(context: Context) {
+    fun playFailure(context: Context, reason: String? = null) {
         val ctx = context.applicationContext
+        vibratePattern(ctx, longArrayOf(0, 60, 80, 60))
+        if (DoorPrefs.getSoundEnabled(ctx)) {
+            val message = if (reason.isNullOrBlank()) "Failed to open door" else "Failed: $reason"
+            speak(ctx, message)
+        }
+        playTone(ctx, ToneGenerator.TONE_PROP_NACK, 220, 80)
+    }
+
+    fun playBlockedWarning(context: Context, reason: String? = null) {
+        val ctx = context.applicationContext
+        vibrateShort(ctx, 55L)
+        if (DoorPrefs.getSoundEnabled(ctx)) {
+            val message = reason ?: "Cannot open door"
+            speak(ctx, message)
+        }
+    }
+
+    fun speakStatus(context: Context, status: String) {
+        if (DoorPrefs.getSoundEnabled(context.applicationContext)) {
+            speak(context.applicationContext, status)
+        }
+    }
+
+    private fun playTone(ctx: Context, toneType: Int, durationMs: Int, volume: Int) {
         try {
-            if (DoorPrefs.getSoundEnabled(ctx)) {
-                val tone = ToneGenerator(AudioManager.STREAM_ACCESSIBILITY, 80)
-                tone.startTone(ToneGenerator.TONE_PROP_NACK, 220)
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
-                    { tone.release() },
-                    280
-                )
-            }
+            val tone = ToneGenerator(AudioManager.STREAM_ACCESSIBILITY, volume)
+            tone.startTone(toneType, durationMs)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                { tone.release() },
+                (durationMs + 50).toLong()
+            )
         } catch (_: Exception) {
         }
-        vibratePattern(ctx, longArrayOf(0, 60, 80, 60))
-    }
-
-    fun playBlockedWarning(context: Context) {
-        vibrateShort(context.applicationContext, 55L)
     }
 
     private fun vibrateShort(context: Context, durationMs: Long) {

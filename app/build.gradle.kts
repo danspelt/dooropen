@@ -66,6 +66,8 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
 }
 
+// NOTE: Windows ".search-ms" entries (Saved Searches) are not real directories.
+// Your `Downloads.search-ms` points at the CrossDevice folder `storage/Download`, so we copy there.
 val crossDeviceDownloadsDir = File("C:/Users/Dans.minme/CrossDevice/Pixel 7 Pro/storage/Download")
 val debugApkFile = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
 

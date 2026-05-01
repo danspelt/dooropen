@@ -15,12 +15,16 @@ object DoorPrefs {
     private const val K_TOKEN = "token"
     private const val K_SECRET = "secret"
     private const val K_DEVICE_ID = "device_id"
+    private const val K_BLE_ENABLED = "ble_enabled"
+    private const val K_BLE_MAC = "ble_mac"
+    private const val K_BLE_PASSWORD = "ble_password"
     private const val K_TRIGGER = "trigger_key"
     private const val K_HOME_SAFETY = "home_safety"
     private const val K_HOME_SSID = "home_ssid"
     private const val K_BT_SAFETY = "bt_safety"
     private const val K_SOUND = "sound_feedback"
     private const val K_VIBRATION = "vibration_feedback"
+    private const val K_AUTO_OPEN = "auto_open_enabled"
 
     private fun prefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
@@ -45,7 +49,22 @@ object DoorPrefs {
     fun getDeviceId(context: Context) = prefs(context).getString(K_DEVICE_ID, "").orEmpty().trim()
 
     @Throws(GeneralSecurityException::class, IOException::class)
+    fun getBleEnabled(context: Context) = prefs(context).getBoolean(K_BLE_ENABLED, false)
+
+    @Throws(GeneralSecurityException::class, IOException::class)
+    fun getBleMac(context: Context) = prefs(context).getString(K_BLE_MAC, "").orEmpty().trim()
+
+    @Throws(GeneralSecurityException::class, IOException::class)
+    fun getBlePassword(context: Context) = prefs(context).getString(K_BLE_PASSWORD, "").orEmpty()
+
+    @Throws(GeneralSecurityException::class, IOException::class)
     fun getTriggerKey(context: Context) = prefs(context).getString(K_TRIGGER, "").orEmpty().trim()
+
+    fun isBleConfigured(context: Context): Boolean = try {
+        getBleEnabled(context) && getBleMac(context).isNotEmpty()
+    } catch (_: Exception) {
+        false
+    }
 
     fun isConfigured(context: Context): Boolean = try {
         getToken(context).isNotEmpty() && getSecret(context).isNotEmpty() && getDeviceId(context).isNotEmpty()
@@ -69,11 +88,17 @@ object DoorPrefs {
     fun getVibrationEnabled(context: Context) = prefs(context).getBoolean(K_VIBRATION, true)
 
     @Throws(GeneralSecurityException::class, IOException::class)
+    fun getAutoOpenEnabled(context: Context) = prefs(context).getBoolean(K_AUTO_OPEN, false)
+
+    @Throws(GeneralSecurityException::class, IOException::class)
     fun save(
         context: Context,
         token: String,
         secret: String,
         deviceId: String,
+        bleEnabled: Boolean,
+        bleMac: String,
+        blePassword: String,
         triggerKey: String,
         homeSafety: Boolean,
         homeSsid: String,
@@ -85,12 +110,21 @@ object DoorPrefs {
             .putString(K_TOKEN, token.trim())
             .putString(K_SECRET, secret.trim())
             .putString(K_DEVICE_ID, deviceId.trim())
+            .putBoolean(K_BLE_ENABLED, bleEnabled)
+            .putString(K_BLE_MAC, bleMac.trim())
+            .putString(K_BLE_PASSWORD, blePassword)
             .putString(K_TRIGGER, triggerKey.trim())
             .putBoolean(K_HOME_SAFETY, homeSafety)
             .putString(K_HOME_SSID, homeSsid.trim())
             .putBoolean(K_BT_SAFETY, btSafety)
             .putBoolean(K_SOUND, sound)
             .putBoolean(K_VIBRATION, vibration)
+            .apply()
+    }
+
+    fun setAutoOpenEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit()
+            .putBoolean(K_AUTO_OPEN, enabled)
             .apply()
     }
 }

@@ -16,6 +16,14 @@ object SwitchBotApi {
 
     data class ApiResult(val ok: Boolean, val message: String)
 
+    data class DeviceInfo(
+        val deviceId: String,
+        val deviceName: String,
+        val deviceType: String,
+        val hubDeviceId: String?,
+        val enableCloudService: Boolean?,
+    )
+
     private fun signHeaders(token: String, secret: String): Map<String, String> {
         val nonce = UUID.randomUUID().toString()
         val t = System.currentTimeMillis().toString()
@@ -44,6 +52,18 @@ object SwitchBotApi {
         return stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
     }
 
+    private fun parseApiError(code: Int, body: String): String {
+        if (body.isBlank()) return "HTTP $code"
+        return try {
+            val json = JSONObject(body)
+            val status = json.optInt("statusCode", -1)
+            val msg = json.optString("message", "").ifBlank { "API $status" }
+            "HTTP $code • $msg"
+        } catch (_: Exception) {
+            "HTTP $code"
+        }
+    }
+
     fun testConnection(token: String, secret: String): ApiResult {
         if (token.isEmpty() || secret.isEmpty()) {
             return ApiResult(false, "Missing token or secret")
@@ -59,12 +79,63 @@ object SwitchBotApi {
             val code = conn.responseCode
             val body = readBody(conn)
             if (code !in 200..299) {
-                return ApiResult(false, "HTTP $code")
+                return ApiResult(false, parseApiError(code, body))
             }
             val json = JSONObject(body)
             val status = json.optInt("statusCode", -1)
             if (status == 100) ApiResult(true, json.optString("message", "OK"))
             else ApiResult(false, json.optString("message", "API $status"))
+        } catch (e: Exception) {
+            ApiResult(false, e.message ?: "Error")
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    fun verifyDevice(token: String, secret: String, deviceId: String): ApiResult {
+        if (token.isEmpty() || secret.isEmpty() || deviceId.isEmpty()) {
+            return ApiResult(false, "Missing credentials")
+        }
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL("$API_BASE/devices").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 20_000
+                readTimeout = 20_000
+                signHeaders(token, secret).forEach { (k, v) -> setRequestProperty(k, v) }
+            }
+            val code = conn.responseCode
+            val body = readBody(conn)
+            if (code !in 200..299) return ApiResult(false, parseApiError(code, body))
+
+            val json = JSONObject(body)
+            val status = json.optInt("statusCode", -1)
+            if (status != 100) {
+                val msg = json.optString("message", "").ifBlank { "API $status" }
+                return ApiResult(false, msg)
+            }
+
+            val deviceList = json.optJSONObject("body")?.optJSONArray("deviceList")
+            val found = (0 until (deviceList?.length() ?: 0))
+                .mapNotNull { idx -> deviceList?.optJSONObject(idx) }
+                .firstOrNull { it.optString("deviceId") == deviceId }
+                ?: return ApiResult(false, "DeviceId not found in /devices list")
+
+            val info = DeviceInfo(
+                deviceId = found.optString("deviceId", deviceId),
+                deviceName = found.optString("deviceName", ""),
+                deviceType = found.optString("deviceType", ""),
+                hubDeviceId = found.optString("hubDeviceId", "").ifBlank { null },
+                enableCloudService = if (found.has("enableCloudService")) found.optBoolean("enableCloudService") else null,
+            )
+
+            val cloud = when (info.enableCloudService) {
+                true -> "cloud=on"
+                false -> "cloud=off"
+                null -> "cloud=?"
+            }
+            val hub = info.hubDeviceId ?: "-"
+            ApiResult(true, "Found: ${info.deviceName} (${info.deviceType}), $cloud, hub=$hub")
         } catch (e: Exception) {
             ApiResult(false, e.message ?: "Error")
         } finally {
@@ -88,7 +159,11 @@ object SwitchBotApi {
                 signHeaders(token, secret).forEach { (k, v) -> setRequestProperty(k, v) }
             }
             OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { it.write(body) }
-            val json = JSONObject(readBody(conn))
+            val code = conn.responseCode
+            val raw = readBody(conn)
+            if (code !in 200..299) return ApiResult(false, parseApiError(code, raw))
+
+            val json = JSONObject(raw)
             val status = json.optInt("statusCode", -1)
             val msg = json.optString("message", "")
             if (status == 100) ApiResult(true, if (msg.isEmpty()) "OK" else msg)
