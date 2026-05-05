@@ -3,6 +3,7 @@ package com.example.dooropen.domain
 import android.content.Context
 import com.example.dooropen.R
 import com.example.dooropen.data.DoorPrefs
+import com.example.dooropen.data.SeamApi
 import com.example.dooropen.data.SwitchBotBle
 import com.example.dooropen.data.SwitchBotApi
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,12 @@ object DoorCommand {
     sealed class PressOutcome {
         data object Success : PressOutcome()
         data class Failed(val message: String) : PressOutcome()
+    }
+
+    sealed class SeamOutcome {
+        data object Success : SeamOutcome()
+        data class Failed(val message: String) : SeamOutcome()
+        data object NotConfigured : SeamOutcome()
     }
 
     private fun prefs(context: Context) =
@@ -108,9 +115,77 @@ object DoorCommand {
         null
     }
 
-    /** Records cooldown and sends SwitchBot press. Call only after [evaluate] returned null. */
+    /**
+     * Full door open flow with Seam August integration:
+     * 1. Check if Seam enabled -> check lock status
+     * 2. If offline -> fail
+     * 3. If locked -> send unlock, poll for success
+     * 4. Verify unlocked status
+     * 5. Only then trigger SwitchBot
+     */
     suspend fun commitPress(context: Context): PressOutcome = withContext(Dispatchers.Default) {
         markAttempt(context)
+
+        // Step 1: Handle Seam August lock if enabled
+        val seamEnabled = DoorPrefs.getSeamEnabled(context)
+        if (seamEnabled) {
+            val apiKey = DoorPrefs.getSeamApiKey(context)
+            val deviceId = DoorPrefs.getSeamDeviceId(context)
+
+            if (apiKey.isEmpty() || deviceId.isEmpty()) {
+                return@withContext PressOutcome.Failed("Seam: Missing API key or device ID")
+            }
+
+            // 1a. Check current lock state
+            val deviceResult = withContext(Dispatchers.IO) {
+                SeamApi.getDevice(apiKey, deviceId)
+            }
+            if (!deviceResult.ok) {
+                return@withContext PressOutcome.Failed("Seam: ${deviceResult.message}")
+            }
+            if (deviceResult.online != true) {
+                return@withContext PressOutcome.Failed("August lock is offline")
+            }
+
+            // 1b. Unlock if needed
+            if (deviceResult.locked == true) {
+                val unlockResult = withContext(Dispatchers.IO) {
+                    SeamApi.unlockDoor(apiKey, deviceId)
+                }
+                if (!unlockResult.success) {
+                    return@withContext PressOutcome.Failed("Seam unlock: ${unlockResult.message}")
+                }
+
+                // 1c. Poll for unlock confirmation (max 10 seconds)
+                var unlockedConfirmed = false
+                val actionId = unlockResult.actionAttemptId
+                if (actionId != null) {
+                    repeat(10) { attempt ->
+                        kotlinx.coroutines.delay(1000)
+                        val pollResult = withContext(Dispatchers.IO) {
+                            SeamApi.getActionAttempt(apiKey, actionId)
+                        }
+                        if (pollResult.success) {
+                            unlockedConfirmed = true
+                            return@repeat
+                        }
+                        // Continue polling unless explicitly failed
+                    }
+                }
+
+                // 1d. Final verification by checking device state
+                if (!unlockedConfirmed) {
+                    val verifyResult = withContext(Dispatchers.IO) {
+                        SeamApi.getDevice(apiKey, deviceId)
+                    }
+                    if (!verifyResult.ok || verifyResult.locked != false) {
+                        return@withContext PressOutcome.Failed("Lock did not confirm unlock. Door opener was not triggered.")
+                    }
+                }
+            }
+        }
+
+        // Step 2: Press SwitchBot to open door
         try {
             val bleEnabled = DoorPrefs.getBleEnabled(context)
             if (bleEnabled) {
@@ -129,6 +204,23 @@ object DoorCommand {
             return@withContext if (api.ok) PressOutcome.Success else PressOutcome.Failed(api.message)
         } catch (_: Exception) {
             return@withContext PressOutcome.Failed(context.getString(R.string.blocked_prefs))
+        }
+    }
+
+    /** Test Seam connection */
+    suspend fun testSeam(context: Context): SeamOutcome = withContext(Dispatchers.IO) {
+        try {
+            if (!DoorPrefs.getSeamEnabled(context)) {
+                return@withContext SeamOutcome.NotConfigured
+            }
+            val apiKey = DoorPrefs.getSeamApiKey(context)
+            if (apiKey.isEmpty()) {
+                return@withContext SeamOutcome.Failed("Missing Seam API key")
+            }
+            val result = SeamApi.testConnection(apiKey)
+            if (result.ok) SeamOutcome.Success else SeamOutcome.Failed(result.message)
+        } catch (e: Exception) {
+            SeamOutcome.Failed(e.message ?: "Seam test failed")
         }
     }
 }

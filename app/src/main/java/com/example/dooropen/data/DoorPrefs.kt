@@ -25,6 +25,9 @@ object DoorPrefs {
     private const val K_SOUND = "sound_feedback"
     private const val K_VIBRATION = "vibration_feedback"
     private const val K_AUTO_OPEN = "auto_open_enabled"
+    private const val K_SEAM_ENABLED = "seam_enabled"
+    private const val K_SEAM_API_KEY = "seam_api_key"
+    private const val K_SEAM_DEVICE_ID = "seam_device_id"
 
     private fun prefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
@@ -91,6 +94,21 @@ object DoorPrefs {
     fun getAutoOpenEnabled(context: Context) = prefs(context).getBoolean(K_AUTO_OPEN, false)
 
     @Throws(GeneralSecurityException::class, IOException::class)
+    fun getSeamEnabled(context: Context) = prefs(context).getBoolean(K_SEAM_ENABLED, false)
+
+    @Throws(GeneralSecurityException::class, IOException::class)
+    fun getSeamApiKey(context: Context) = prefs(context).getString(K_SEAM_API_KEY, "").orEmpty().trim()
+
+    @Throws(GeneralSecurityException::class, IOException::class)
+    fun getSeamDeviceId(context: Context) = prefs(context).getString(K_SEAM_DEVICE_ID, "").orEmpty().trim()
+
+    fun isSeamConfigured(context: Context): Boolean = try {
+        getSeamEnabled(context) && getSeamApiKey(context).isNotEmpty() && getSeamDeviceId(context).isNotEmpty()
+    } catch (_: Exception) {
+        false
+    }
+
+    @Throws(GeneralSecurityException::class, IOException::class)
     fun save(
         context: Context,
         token: String,
@@ -105,6 +123,9 @@ object DoorPrefs {
         btSafety: Boolean,
         sound: Boolean,
         vibration: Boolean,
+        seamEnabled: Boolean = false,
+        seamApiKey: String = "",
+        seamDeviceId: String = "",
     ) {
         prefs(context).edit()
             .putString(K_TOKEN, token.trim())
@@ -119,12 +140,28 @@ object DoorPrefs {
             .putBoolean(K_BT_SAFETY, btSafety)
             .putBoolean(K_SOUND, sound)
             .putBoolean(K_VIBRATION, vibration)
+            .putBoolean(K_SEAM_ENABLED, seamEnabled)
+            .putString(K_SEAM_API_KEY, seamApiKey.trim())
+            .putString(K_SEAM_DEVICE_ID, seamDeviceId.trim())
             .apply()
     }
 
     fun setAutoOpenEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit()
             .putBoolean(K_AUTO_OPEN, enabled)
+            .apply()
+    }
+
+    fun saveSeam(
+        context: Context,
+        enabled: Boolean,
+        apiKey: String,
+        deviceId: String,
+    ) {
+        prefs(context).edit()
+            .putBoolean(K_SEAM_ENABLED, enabled)
+            .putString(K_SEAM_API_KEY, apiKey.trim())
+            .putString(K_SEAM_DEVICE_ID, deviceId.trim())
             .apply()
     }
 }

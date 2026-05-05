@@ -43,6 +43,7 @@ import androidx.core.content.ContextCompat
 import com.example.dooropen.DoorShortcut
 import com.example.dooropen.R
 import com.example.dooropen.data.DoorPrefs
+import com.example.dooropen.data.SeamApi
 import com.example.dooropen.data.SwitchBotApi
 import com.example.dooropen.util.SwitchBotLauncher
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +69,9 @@ fun SettingsScreen(onBack: () -> Unit) {
     var btSafety by remember { mutableStateOf(false) }
     var sound by remember { mutableStateOf(true) }
     var vibration by remember { mutableStateOf(true) }
+    var seamEnabled by remember { mutableStateOf(false) }
+    var seamApiKey by remember { mutableStateOf("") }
+    var seamDeviceId by remember { mutableStateOf("") }
     var showHelp by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -84,6 +88,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             btSafety = DoorPrefs.getBtSafetyEnabled(context)
             sound = DoorPrefs.getSoundEnabled(context)
             vibration = DoorPrefs.getVibrationEnabled(context)
+            seamEnabled = DoorPrefs.getSeamEnabled(context)
+            seamApiKey = DoorPrefs.getSeamApiKey(context)
+            seamDeviceId = DoorPrefs.getSeamDeviceId(context)
         } catch (_: Exception) {
             Toast.makeText(context, R.string.open_error_prefs, Toast.LENGTH_LONG).show()
         }
@@ -112,6 +119,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             btSafety = btSafety,
             sound = sound,
             vibration = vibration,
+            seamEnabled = seamEnabled,
+            seamApiKey = seamApiKey,
+            seamDeviceId = seamDeviceId,
             onBack = onBack,
         )
     }
@@ -298,6 +308,90 @@ fun SettingsScreen(onBack: () -> Unit) {
                 checked = vibration,
                 onCheckedChange = { vibration = it },
             )
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+            // Seam August Lock Section
+            Text("August Smart Lock (via Seam)", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Seam provides official API access to August locks. Get your API key at seam.co",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            RowSwitch(
+                title = "Enable August Integration",
+                subtitle = "Unlock August first, then open door",
+                checked = seamEnabled,
+                onCheckedChange = { seamEnabled = it },
+            )
+            OutlinedTextField(
+                value = seamApiKey,
+                onValueChange = { seamApiKey = it },
+                label = { Text("Seam API Key") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                enabled = seamEnabled,
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = seamDeviceId,
+                onValueChange = { seamDeviceId = it },
+                label = { Text("August Device ID") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = seamEnabled,
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) {
+                            SeamApi.testConnection(seamApiKey.trim())
+                        }
+                        Toast.makeText(
+                            context,
+                            if (r.ok) "Seam connected: ${r.message}" else "Seam failed: ${r.message}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = seamEnabled && seamApiKey.isNotBlank(),
+            ) {
+                Text("Test Seam Connection")
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        val (locks, error) = withContext(Dispatchers.IO) {
+                            SeamApi.listDevices(seamApiKey.trim())
+                        }
+                        if (error != null) {
+                            Toast.makeText(context, "Error: $error", Toast.LENGTH_LONG).show()
+                        } else if (locks.isEmpty()) {
+                            Toast.makeText(context, "No locks found", Toast.LENGTH_LONG).show()
+                        } else {
+                            // Show first lock ID as a toast so user can copy it
+                            val first = locks.first()
+                            seamDeviceId = first.first
+                            Toast.makeText(
+                                context,
+                                "Found ${locks.size} lock(s). First: ${first.second} (${first.first})",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = seamEnabled && seamApiKey.isNotBlank(),
+            ) {
+                Text("Fetch August Lock IDs")
+            }
             Spacer(Modifier.height(24.dp))
             Button(
                 onClick = {
@@ -387,6 +481,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                             btSafety = btSafety,
                             sound = sound,
                             vibration = vibration,
+                            seamEnabled = seamEnabled,
+                            seamApiKey = seamApiKey,
+                            seamDeviceId = seamDeviceId,
                             onBack = onBack,
                         )
                     }
@@ -414,6 +511,9 @@ private fun persistAndBack(
     btSafety: Boolean,
     sound: Boolean,
     vibration: Boolean,
+    seamEnabled: Boolean,
+    seamApiKey: String,
+    seamDeviceId: String,
     onBack: () -> Unit,
 ) {
     scope.launch {
@@ -432,6 +532,9 @@ private fun persistAndBack(
                 btSafety,
                 sound,
                 vibration,
+                seamEnabled,
+                seamApiKey,
+                seamDeviceId,
             )
             DoorShortcut.refresh(context)
             Toast.makeText(context, R.string.saved, Toast.LENGTH_SHORT).show()
