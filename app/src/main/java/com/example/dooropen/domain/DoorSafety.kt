@@ -1,7 +1,6 @@
 package com.example.dooropen.domain
 
 import android.Manifest
-import android.app.KeyguardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -13,10 +12,6 @@ object DoorSafety {
     /** @return null if allowed, otherwise a user-visible reason */
     fun blockReason(context: Context): String? {
         val app = context.applicationContext
-        val km = app.getSystemService(KeyguardManager::class.java)
-        if (km.isKeyguardLocked) {
-            return context.getString(R.string.blocked_keyguard)
-        }
         try {
             if (DoorPrefs.getHomeSafetyEnabled(context)) {
                 if (ContextCompat.checkSelfPermission(

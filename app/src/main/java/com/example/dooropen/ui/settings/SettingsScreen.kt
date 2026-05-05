@@ -123,6 +123,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
         if ((btSafety || bleEnabled) && android.os.Build.VERSION.SDK_INT >= 31) {
             list.add(Manifest.permission.BLUETOOTH_CONNECT)
+            list.add(Manifest.permission.BLUETOOTH_SCAN)
         }
         return list
     }

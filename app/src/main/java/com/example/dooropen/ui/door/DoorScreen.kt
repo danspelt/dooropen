@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -59,6 +61,7 @@ import com.example.dooropen.domain.DeviceStatus
 import com.example.dooropen.domain.DoorCommand
 import com.example.dooropen.domain.DoorFeedback
 import com.example.dooropen.domain.ProximityMonitor
+import com.example.dooropen.service.ProximityService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -72,7 +75,7 @@ private enum class DoorPhase {
 private fun DeviceStatus.State.toDisplayText(): String = when (this) {
     is DeviceStatus.State.Unknown -> "Checking connection..."
     is DeviceStatus.State.Checking -> "Checking..."
-    is DeviceStatus.State.Connected -> "Device connected"
+    is DeviceStatus.State.Connected -> if (battery != null) "Bot battery: $battery%" else "Device connected"
     is DeviceStatus.State.Disconnected -> "Device not connected"
     is DeviceStatus.State.Error -> "Connection error"
 }
@@ -115,6 +118,8 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
     var deviceStatus by remember { mutableStateOf<DeviceStatus.State>(DeviceStatus.State.Unknown) }
     var proximityState by remember { mutableStateOf<ProximityMonitor.ProximityState>(ProximityMonitor.ProximityState.Unknown) }
     var autoOpenEnabled by remember { mutableStateOf(false) }
+    var bleBattery by remember { mutableStateOf<Int?>(null) }
+    var bleDebugLines by remember { mutableStateOf<List<String>>(emptyList()) }
     val focusRequester = remember { FocusRequester() }
 
     // Load auto-open preference
@@ -179,9 +184,17 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                     }
                 }
             })
-            ProximityMonitor.setAutoOpenEnabled(autoOpenEnabled) // Respect user preference
+            ProximityMonitor.setAutoOpenEnabled(autoOpenEnabled)
 
             ProximityMonitor.startMonitoring(context)
+            // Collect BLE battery level from advertisement data
+            scope.launch {
+                ProximityMonitor.battery.collect { batt -> bleBattery = batt }
+            }
+            // Collect raw BLE debug data for on-screen display
+            scope.launch {
+                ProximityMonitor.bleDebug.collect { lines -> bleDebugLines = lines }
+            }
             // Collect proximity state changes
             ProximityMonitor.state.collect { state ->
                 proximityState = state
@@ -256,7 +269,7 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                         return@launch
                     }
 
-                    val blocked = DoorCommand.evaluate(context)
+                    val blocked = DoorCommand.evaluate(context, skipCooldown = true)
                     if (blocked != null) {
                         failureDetail = blocked.message
                         phase = DoorPhase.Failed
@@ -320,19 +333,63 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                     .background(deviceStatus.toColor())
             )
             Spacer(modifier = Modifier.padding(horizontal = 8.dp))
-            Text(
-                text = statusText,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                style = MaterialTheme.typography.bodyLarge,
-                color = when {
-                proximityState is ProximityMonitor.ProximityState.VeryNear -> Color(0xFF00BCD4)
-                proximityState is ProximityMonitor.ProximityState.Near -> Color(0xFF03A9F4)
-                deviceStatus is DeviceStatus.State.Connected -> Color(0xFF4CAF50)
-                deviceStatus is DeviceStatus.State.Disconnected || deviceStatus is DeviceStatus.State.Error -> Color(0xFFF44336)
-                else -> MaterialTheme.colorScheme.onSurface
-            },
-                textAlign = TextAlign.Center,
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = statusText,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = when {
+                        proximityState is ProximityMonitor.ProximityState.VeryNear -> Color(0xFF00BCD4)
+                        proximityState is ProximityMonitor.ProximityState.Near -> Color(0xFF03A9F4)
+                        deviceStatus is DeviceStatus.State.Connected -> Color(0xFF4CAF50)
+                        deviceStatus is DeviceStatus.State.Disconnected || deviceStatus is DeviceStatus.State.Error -> Color(0xFFF44336)
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    textAlign = TextAlign.Center,
+                )
+                // Battery bar: prefer BLE advertisement battery, fall back to API battery
+                val connectedState = deviceStatus as? DeviceStatus.State.Connected
+                val batt = bleBattery ?: connectedState?.battery
+                if (batt != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(60.dp)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF333333))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(batt / 100f)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(
+                                        when {
+                                            batt >= 50 -> Color(0xFF4CAF50)
+                                            batt >= 20 -> Color(0xFFFFA000)
+                                            else -> Color(0xFFF44336)
+                                        }
+                                    )
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "$batt%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when {
+                                batt >= 50 -> Color(0xFF4CAF50)
+                                batt >= 20 -> Color(0xFFFFA000)
+                                else -> Color(0xFFF44336)
+                            },
+                        )
+                    }
+                }
+            }
             // Refresh button for status
             IconButton(
                 onClick = {
@@ -378,6 +435,7 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                         autoOpenEnabled = it
                         DoorPrefs.setAutoOpenEnabled(context, it)
                         ProximityMonitor.setAutoOpenEnabled(it)
+                        ProximityService.updateAutoOpen(context, it)
                         if (it) {
                             DoorFeedback.speakStatus(context, "Auto-open enabled")
                         } else {
@@ -494,8 +552,22 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                             )
                         }
                     }
+                    is ProximityMonitor.ProximityState.Error -> {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Filled.Warning,
+                                contentDescription = "Error",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp),
+                            )
+                            Text(
+                                text = "Error",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
                     else -> {
-                        // Unknown or Error - show default
                         Text(
                             text = "?",
                             color = Color.White,
@@ -510,11 +582,11 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
             // Distance text
             Text(
                 text = when (currentProximity) {
-                    is ProximityMonitor.ProximityState.VeryNear -> if (autoOpenEnabled) "Auto-opening..." else "Very close! Tap to open"
+                    is ProximityMonitor.ProximityState.VeryNear -> if (autoOpenEnabled) "Auto-opened!" else "Very close! Tap to open"
                     is ProximityMonitor.ProximityState.Near -> "Keep walking..."
                     is ProximityMonitor.ProximityState.Far -> "Getting closer..."
                     is ProximityMonitor.ProximityState.NotDetected -> "Too far - walk closer"
-                    is ProximityMonitor.ProximityState.Scanning -> "Looking for bot..."
+                    is ProximityMonitor.ProximityState.Scanning -> "Looking for bot above door..."
                     is ProximityMonitor.ProximityState.Error -> "Scan error"
                     else -> "Waiting for signal..."
                 },
@@ -523,17 +595,27 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
 
-            // Estimated distance in feet (rough approximation)
+            // Show detailed error message
+            if (currentProximity is ProximityMonitor.ProximityState.Error) {
+                Text(
+                    text = currentProximity.message,
+                    modifier = Modifier.padding(top = 4.dp, start = 24.dp, end = 24.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFF44336),
+                    textAlign = TextAlign.Center,
+                )
+            }
+
+            // Estimated distance in feet + raw dBm for calibration
             if (displayRssi != null) {
                 val estimatedFeet = when {
-                    displayRssi >= -45 -> "1-2 ft"
-                    displayRssi >= -55 -> "3-5 ft"
-                    displayRssi >= -65 -> "6-10 ft"
-                    displayRssi >= -75 -> "11-15 ft"
-                    else -> "15+ ft"
+                    displayRssi >= -68 -> "~at door"
+                    displayRssi >= -78 -> "~5 ft"
+                    displayRssi >= -88 -> "~10 ft"
+                    else -> "~15+ ft"
                 }
                 Text(
-                    text = "~$estimatedFeet away",
+                    text = "$estimatedFeet from door  ($displayRssi dBm)",
                     modifier = Modifier.padding(top = 4.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -562,6 +644,32 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                 color = Color(0xFFF44336),
                 textAlign = TextAlign.Center,
             )
+        }
+
+        // BLE debug panel - raw advertisement bytes
+        if (bleDebugLines.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .background(Color(0xFF1A1A2E), RoundedCornerShape(8.dp))
+                    .padding(8.dp),
+            ) {
+                Text(
+                    text = "BLE DEBUG",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFFFD700),
+                )
+                bleDebugLines.forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF00FF99),
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(32.dp))

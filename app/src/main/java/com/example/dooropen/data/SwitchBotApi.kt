@@ -143,6 +143,37 @@ object SwitchBotApi {
         }
     }
 
+    data class BatteryResult(val ok: Boolean, val battery: Int?, val message: String)
+
+    fun getBotBattery(token: String, secret: String, deviceId: String): BatteryResult {
+        if (token.isEmpty() || secret.isEmpty() || deviceId.isEmpty()) {
+            return BatteryResult(false, null, "Missing credentials")
+        }
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL("$API_BASE/devices/$deviceId/status").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 20_000
+                readTimeout = 20_000
+                signHeaders(token, secret).forEach { (k, v) -> setRequestProperty(k, v) }
+            }
+            val code = conn.responseCode
+            val body = readBody(conn)
+            if (code !in 200..299) return BatteryResult(false, null, parseApiError(code, body))
+
+            val json = JSONObject(body)
+            if (json.optInt("statusCode", -1) != 100) {
+                return BatteryResult(false, null, json.optString("message", "API error"))
+            }
+            val battery = json.optJSONObject("body")?.optInt("battery", -1)?.takeIf { it >= 0 }
+            BatteryResult(true, battery, if (battery != null) "$battery%" else "N/A")
+        } catch (e: Exception) {
+            BatteryResult(false, null, e.message ?: "Error")
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
     fun pressBot(token: String, secret: String, deviceId: String): ApiResult {
         if (token.isEmpty() || secret.isEmpty() || deviceId.isEmpty()) {
             return ApiResult(false, "Missing credentials")

@@ -11,7 +11,7 @@ object DeviceStatus {
     sealed class State {
         data object Unknown : State()
         data object Checking : State()
-        data class Connected(val deviceName: String) : State()
+        data class Connected(val deviceName: String, val battery: Int? = null) : State()
         data class Disconnected(val reason: String) : State()
         data class Error(val message: String) : State()
     }
@@ -55,12 +55,11 @@ object DeviceStatus {
 
             // Test the connection by fetching device list
             val result = SwitchBotApi.verifyDevice(token, secret, deviceId)
+            if (!result.ok) return State.Disconnected(result.message)
 
-            if (result.ok) {
-                State.Connected(result.message)
-            } else {
-                State.Disconnected(result.message)
-            }
+            // Fetch battery level from device status endpoint
+            val batteryResult = SwitchBotApi.getBotBattery(token, secret, deviceId)
+            State.Connected(result.message, batteryResult.battery)
         } catch (e: Exception) {
             State.Error(e.message ?: "Unknown error")
         }

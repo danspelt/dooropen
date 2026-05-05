@@ -59,7 +59,7 @@ class OpenDoorActivity : ComponentActivity() {
                 return@launch
             }
 
-            val blocked = DoorCommand.evaluate(this@OpenDoorActivity)
+            val blocked = DoorCommand.evaluate(this@OpenDoorActivity, skipCooldown = true)
             if (blocked != null) {
                 DoorFeedback.playBlockedWarning(this@OpenDoorActivity, blocked.message)
                 toast(blocked.message)

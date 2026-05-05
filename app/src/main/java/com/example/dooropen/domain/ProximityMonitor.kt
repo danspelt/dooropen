@@ -1,5 +1,6 @@
 package com.example.dooropen.domain
 
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
@@ -7,9 +8,11 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import com.example.dooropen.data.DoorPrefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,10 +37,16 @@ object ProximityMonitor {
     private var autoOpenCallback: AutoOpenCallback? = null
     private var autoOpenEnabled = false
     private var lastAutoOpenTime = 0L
-    private const val AUTO_OPEN_COOLDOWN_MS = 30_000L // 30 seconds between auto-opens
+    private const val AUTO_OPEN_COOLDOWN_MS = 60_000L // 60 seconds between auto-opens
 
     private val _state = MutableStateFlow<ProximityState>(ProximityState.Unknown)
     val state: StateFlow<ProximityState> = _state.asStateFlow()
+
+    private val _battery = MutableStateFlow<Int?>(null)
+    val battery: StateFlow<Int?> = _battery.asStateFlow()
+
+    private val _bleDebug = MutableStateFlow<List<String>>(emptyList())
+    val bleDebug: StateFlow<List<String>> = _bleDebug.asStateFlow()
 
     private var scanCallback: ScanCallback? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -45,10 +54,11 @@ object ProximityMonitor {
     private var hasAnnouncedVeryNear = false
     private var hasAnnouncedNear = false
 
-    // RSSI thresholds (closer = higher number, -30 is touching, -100 is far)
-    private const val VERY_NEAR_THRESHOLD = -45  // 1-2 feet - auto-open zone
-    private const val NEAR_THRESHOLD = -60       // 6-10 feet
-    private const val FAR_THRESHOLD = -80        // 15+ feet
+    // RSSI thresholds calibrated for this specific door (bot on top, user reads ~-67 dBm at door)
+    // Closer = higher number: -30 touching, -100 very far
+    private const val VERY_NEAR_THRESHOLD = -68  // at the door (~-67 dBm measured)
+    private const val NEAR_THRESHOLD = -78       // ~5 feet away
+    private const val FAR_THRESHOLD = -88        // ~10+ feet away
     private const val ANNOUNCE_COOLDOWN_MS = 8000  // Don't announce more than every 8 seconds
 
     fun setAutoOpenEnabled(enabled: Boolean) {
@@ -107,7 +117,21 @@ object ProximityMonitor {
     }
 
     private fun startBleScan(context: Context, adapter: BluetoothAdapter, targetMac: String) {
-        val scanner = adapter.bluetoothLeScanner ?: return
+        // Check BLUETOOTH_SCAN permission on Android 12+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val granted = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.BLUETOOTH_SCAN
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                _state.value = ProximityState.Error("Bluetooth Scan permission not granted. Go to Settings and re-save to grant permissions.")
+                return
+            }
+        }
+
+        val scanner = adapter.bluetoothLeScanner ?: run {
+            _state.value = ProximityState.Error("Bluetooth scanner unavailable. Is Bluetooth on?")
+            return
+        }
 
         _state.value = ProximityState.Scanning
 
@@ -122,12 +146,50 @@ object ProximityMonitor {
                         if (rssi != 0) {
                             updateProximity(rssi, device.name ?: "SwitchBot")
                         }
+                        // Parse battery from SwitchBot manufacturer data
+                        val scanRecord = result.scanRecord
+                        val debugLines = mutableListOf<String>()
+                        debugLines.add("RSSI: ${result.rssi} dBm")
+                        // Dump all manufacturer data
+                        for (mfrId in listOf(0x0969, 0x0009, 0x0059, 0x004C, 0x0006)) {
+                            val mfr = scanRecord?.getManufacturerSpecificData(mfrId)
+                            if (mfr != null && mfr.isNotEmpty()) {
+                                val hex = mfr.joinToString(" ") { "%02X".format(it) }
+                                debugLines.add("Mfr 0x%04X [%d]: %s".format(mfrId, mfr.size, hex))
+                                // Show each byte as decimal too
+                                val dec = mfr.mapIndexed { i, b -> "[$i]=${b.toInt() and 0xFF}" }.joinToString(" ")
+                                debugLines.add("  dec: $dec")
+                            }
+                        }
+                        // Dump all service data
+                        scanRecord?.serviceData?.forEach { (uuid, bytes) ->
+                            val hex = bytes.joinToString(" ") { "%02X".format(it) }
+                            val shortUuid = uuid.toString().take(8)
+                            debugLines.add("SvcData $shortUuid [${bytes.size}]: $hex")
+                            val dec = bytes.mapIndexed { i, b -> "[$i]=${b.toInt() and 0xFF}" }.joinToString(" ")
+                            debugLines.add("  dec: $dec")
+                        }
+                        _bleDebug.value = debugLines
+                        // Current best guess: ID 0x0969, byte[2] bits 6-0
+                        result.scanRecord?.getManufacturerSpecificData(0x0969)?.let { mfr ->
+                            if (mfr.size >= 3) {
+                                val batt = mfr[2].toInt() and 0x7F
+                                if (batt in 0..100) _battery.value = batt
+                            }
+                        }
                     }
                 }
             }
 
             override fun onScanFailed(errorCode: Int) {
-                _state.value = ProximityState.Error("Scan failed: $errorCode")
+                val reason = when (errorCode) {
+                    ScanCallback.SCAN_FAILED_ALREADY_STARTED -> "Already scanning"
+                    ScanCallback.SCAN_FAILED_APPLICATION_REGISTRATION_FAILED -> "App registration failed"
+                    ScanCallback.SCAN_FAILED_FEATURE_UNSUPPORTED -> "BLE not supported on this device"
+                    ScanCallback.SCAN_FAILED_INTERNAL_ERROR -> "Bluetooth internal error - try toggling Bluetooth off/on"
+                    else -> "Error code $errorCode"
+                }
+                _state.value = ProximityState.Error(reason)
             }
         }
 
@@ -156,7 +218,7 @@ object ProximityMonitor {
             rssi >= VERY_NEAR_THRESHOLD -> {
                 _state.value = ProximityState.VeryNear(rssi, deviceName)
 
-                // Auto-open trigger when very close
+                // Auto-open trigger when very close - fire immediately, respect cooldown
                 if (autoOpenEnabled && now - lastAutoOpenTime > AUTO_OPEN_COOLDOWN_MS) {
                     lastAutoOpenTime = now
                     autoOpenCallback?.onAutoOpenTrigger()
@@ -178,7 +240,6 @@ object ProximityMonitor {
             }
             rssi >= FAR_THRESHOLD -> {
                 _state.value = ProximityState.Far(rssi)
-                // Reset announcements when walking away
                 hasAnnouncedNear = false
                 hasAnnouncedVeryNear = false
             }
@@ -225,7 +286,7 @@ object ProximityMonitor {
     }
 
     fun getStatusMessage(): String {
-        return when (val state = _state.value) {
+        return when (_state.value) {
             is ProximityState.VeryNear -> "Very close! Auto-opening enabled"
             is ProximityState.Near -> "Getting close..."
             is ProximityState.Far -> "Walk closer to the door"

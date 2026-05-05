@@ -73,13 +73,16 @@ object DoorCommand {
             .apply()
     }
 
-    /** Safety, cooldown, and credentials — before "door opening" feedback. */
-    suspend fun evaluate(context: Context): Outcome.Blocked? = withContext(Dispatchers.Default) {
+    /** Safety, cooldown, and credentials — before "door opening" feedback.
+     *  Pass skipCooldown=true for manual button presses so they always work immediately. */
+    suspend fun evaluate(context: Context, skipCooldown: Boolean = false): Outcome.Blocked? = withContext(Dispatchers.Default) {
         DoorSafety.blockReason(context)?.let { return@withContext Outcome.Blocked(it) }
-        val remaining = cooldownRemainingMs(context)
-        if (remaining > 0L) {
-            val sec = ((remaining + 999) / 1000).toInt()
-            return@withContext Outcome.Blocked(context.getString(R.string.blocked_cooldown, sec))
+        if (!skipCooldown) {
+            val remaining = cooldownRemainingMs(context)
+            if (remaining > 0L) {
+                val sec = ((remaining + 999) / 1000).toInt()
+                return@withContext Outcome.Blocked(context.getString(R.string.blocked_cooldown, sec))
+            }
         }
         try {
             val bleEnabled = DoorPrefs.getBleEnabled(context)
