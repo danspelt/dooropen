@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Door Assist</string>
+    <string name="app_name">Buddy</string>
     <string name="open_door_label">OPEN DOOR</string>
     <string name="status_ready">Ready</string>
     <string name="status_opening">Opening…</string>
@@ -9,7 +9,7 @@
     <string name="a11y_opening">Door opening</string>
     <string name="cd_open_door_button">Open door</string>
     <string name="cd_settings">Settings</string>
-    <string name="settings_title">Settings</string>
+    <string name="settings_title">Buddy Settings</string>
     <string name="back">Back</string>
     <string name="settings_intro_short">Enter your SwitchBot credentials below. Tap ❓ for step-by-step help.</string>
     <string name="help_title">How to get your credentials</string>
@@ -58,7 +58,7 @@
     <string name="open_bad_key">Wrong trigger key</string>
     <string name="open_error_prefs">Could not read secure settings</string>
     <string name="shortcut_open_door_short">Open door</string>
-    <string name="shortcut_open_door_long">Send SwitchBot press</string>
+    <string name="shortcut_open_door_long">Buddy: open door</string>
     <string name="blocked_keyguard">Unlock your phone first.</string>
     <string name="blocked_location_permission">Location permission is required for home Wi‑Fi check.</string>
     <string name="blocked_ssid_unknown">Could not read Wi‑Fi name. Turn Wi‑Fi on and grant location access.</string>
