@@ -35,6 +35,14 @@ class BuddyVoiceService : Service() {
     private var isListening = false
     private var shouldRestart = true
 
+    /**
+     * True only when the user explicitly turned Buddy off (ACTION_STOP).
+     * On transient service recreation (Android killing/restarting the foreground
+     * service) we must NOT tear down the WebSocket bridge, or the phone keeps
+     * dropping and reconnecting in a loop.
+     */
+    private var userStopped = false
+
     /** true while Buddy is in an active chat conversation */
     private var inConversation = false
     /** timeout to exit conversation if user goes quiet */
@@ -44,6 +52,8 @@ class BuddyVoiceService : Service() {
     private val GREETING_WORDS = listOf("hi buddy", "hey buddy", "hello buddy", "ok buddy", "okay buddy")
     private val MODE_COMPUTER = listOf("buddy computer", "buddy, computer")
     private val MODE_PHONE = listOf("buddy phone", "buddy, phone")
+    private val CALL_PREFIX = listOf("buddy call", "buddy, call")
+    private val HANG_UP = listOf("buddy hang up", "buddy, hang up")
 
     override fun onCreate() {
         super.onCreate()
@@ -57,7 +67,10 @@ class BuddyVoiceService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                userStopped = true
                 shouldRestart = false
+                BuddyBridge.stop()
+                DoorFeedback.shutdown()
                 stopSelf()
             }
         }
@@ -68,8 +81,14 @@ class BuddyVoiceService : Service() {
         shouldRestart = false
         stopRecognizer()
         cancelConversationTimeout()
-        BuddyBridge.stop()
-        DoorFeedback.shutdown()
+        // Only tear down the bridge/TTS when the user explicitly stopped Buddy.
+        // For transient restarts, keep the WebSocket connection alive so the
+        // phone does not enter a connect/disconnect loop. BuddyBridge is a
+        // process-scoped singleton and survives service recreation.
+        if (userStopped) {
+            BuddyBridge.stop()
+            DoorFeedback.shutdown()
+        }
         scope.cancel()
         mainHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
@@ -122,15 +141,48 @@ class BuddyVoiceService : Service() {
         return list.any { lower.contains(it) }
     }
 
+    private fun isHangUp(text: String): Boolean {
+        val lower = text.lowercase().trim()
+        return HANG_UP.any { lower.contains(it) }
+    }
+
+    private fun parseCallContact(text: String): String? {
+        val lower = text.lowercase().trim()
+        for (prefix in CALL_PREFIX) {
+            if (!lower.contains(prefix)) continue
+            val name = lower.substringAfter(prefix).trim().trim(',', '.')
+            if (name.isNotBlank()) return name.replaceFirstChar { it.titlecase() }
+        }
+        return null
+    }
+
     private fun handleModeSwitch(target: String) {
         stopRecognizer()
         exitConversation()
-        BuddyBridge.sendModeSwitch(target, applicationContext)
+        BuddyBridge.sendHeadsetSwitch(target, applicationContext)
         scope.launch {
             val msg = if (target == "computer") "Switching to computer." else "Phone mode."
             DoorFeedback.speak(applicationContext, msg)
             updateNotification(if (target == "computer") "Computer mode" else "Phone mode")
             mainHandler.postDelayed({ scheduleRestart(1200L) }, 2500L)
+        }
+    }
+
+    private fun handleCallContact(contactName: String) {
+        stopRecognizer()
+        exitConversation()
+        scope.launch {
+            BuddyPhoneActions.callContact(applicationContext, contactName)
+            mainHandler.postDelayed({ scheduleRestart(1200L) }, 4000L)
+        }
+    }
+
+    private fun handleHangUp() {
+        stopRecognizer()
+        exitConversation()
+        scope.launch {
+            BuddyPhoneActions.hangUp(applicationContext)
+            mainHandler.postDelayed({ scheduleRestart(1200L) }, 3000L)
         }
     }
 
@@ -183,6 +235,8 @@ class BuddyVoiceService : Service() {
                 // Mode switching — highest priority
                 isModeSwitch(best, "computer") -> handleModeSwitch("computer")
                 isModeSwitch(best, "phone") -> handleModeSwitch("phone")
+                isHangUp(best) -> handleHangUp()
+                parseCallContact(best) != null -> handleCallContact(parseCallContact(best)!!)
 
                 // Always handle "Buddy, open door" regardless of conversation state
                 BuddyCommandProcessor.isCommandMatch(best) -> handleDoorCommand(best)

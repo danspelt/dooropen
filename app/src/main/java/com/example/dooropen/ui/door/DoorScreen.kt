@@ -6,6 +6,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +63,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.dooropen.R
+import com.example.dooropen.buddy.BuddyPermissions
 import com.example.dooropen.buddy.BuddyVoiceService
 import com.example.dooropen.data.DoorPrefs
 import com.example.dooropen.domain.DeviceStatus
@@ -128,6 +131,7 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
     var bleBattery by remember { mutableStateOf<Int?>(null) }
     var bleDebugLines by remember { mutableStateOf<List<String>>(emptyList()) }
     val focusRequester = remember { FocusRequester() }
+    val phoneFocusRequester = remember { FocusRequester() }
 
     // Load preferences
     LaunchedEffect(Unit) {
@@ -135,13 +139,22 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
         try { buddyEnabled = DoorPrefs.getBuddyEnabled(context) } catch (_: Exception) {}
     }
 
-    val micPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            buddyEnabled = true
-            DoorPrefs.setBuddyEnabled(context, true)
+    val buddyPermissions = BuddyPermissions.ALL
+
+    val buddyPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        if (BuddyPermissions.hasMic(context)) {
             BuddyVoiceService.start(context)
+        }
+    }
+
+    // If Buddy was already ON (e.g. after update), prompt for any missing permissions.
+    LaunchedEffect(buddyEnabled) {
+        if (!buddyEnabled) return@LaunchedEffect
+        val missing = BuddyPermissions.missing(context, BuddyPermissions.ALL)
+        if (missing.isNotEmpty()) {
+            buddyPermissionLauncher.launch(missing)
         }
     }
 
@@ -263,8 +276,9 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Button(
@@ -336,6 +350,19 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
         }
+
+        // Headset — right below OPEN DOOR for Switch Access scan order
+        Spacer(modifier = Modifier.height(20.dp))
+        HeadsetControlSection(
+            buddyEnabled = buddyEnabled,
+            onRequestBuddyOn = {
+                buddyEnabled = true
+                DoorPrefs.setBuddyEnabled(context, true)
+                BuddyVoiceService.start(context)
+            },
+            phoneFocusRequester = phoneFocusRequester,
+        )
+
         // Connection status indicator
         Row(
             modifier = Modifier
@@ -486,17 +513,19 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
             Spacer(modifier = Modifier.padding(horizontal = 8.dp))
             Switch(
                 checked = buddyEnabled,
+                modifier = Modifier.semantics {
+                    contentDescription = if (buddyEnabled) "Buddy on" else "Buddy off"
+                    role = Role.Switch
+                },
                 onCheckedChange = { on ->
                     if (on) {
-                        val hasMic = ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (hasMic) {
-                            buddyEnabled = true
-                            DoorPrefs.setBuddyEnabled(context, true)
+                        buddyEnabled = true
+                        DoorPrefs.setBuddyEnabled(context, true)
+                        val missing = BuddyPermissions.missing(context, BuddyPermissions.ALL)
+                        if (missing.isEmpty()) {
                             BuddyVoiceService.start(context)
                         } else {
-                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            buddyPermissionLauncher.launch(missing)
                         }
                     } else {
                         buddyEnabled = false
