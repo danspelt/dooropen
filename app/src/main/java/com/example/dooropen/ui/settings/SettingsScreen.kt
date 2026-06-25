@@ -72,6 +72,8 @@ fun SettingsScreen(onBack: () -> Unit) {
     var seamEnabled by remember { mutableStateOf(false) }
     var seamApiKey by remember { mutableStateOf("") }
     var seamDeviceId by remember { mutableStateOf("") }
+    var openAiKey by remember { mutableStateOf("") }
+    var bridgeHost by remember { mutableStateOf("192.168.1.207") }
     var showHelp by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -91,6 +93,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             seamEnabled = DoorPrefs.getSeamEnabled(context)
             seamApiKey = DoorPrefs.getSeamApiKey(context)
             seamDeviceId = DoorPrefs.getSeamDeviceId(context)
+            openAiKey = DoorPrefs.getOpenAiKey(context)
+            bridgeHost = DoorPrefs.getBridgeHost(context)
         } catch (_: Exception) {
             Toast.makeText(context, R.string.open_error_prefs, Toast.LENGTH_LONG).show()
         }
@@ -122,6 +126,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             seamEnabled = seamEnabled,
             seamApiKey = seamApiKey,
             seamDeviceId = seamDeviceId,
+            openAiKey = openAiKey,
+            bridgeHost = bridgeHost,
             onBack = onBack,
         )
     }
@@ -392,6 +398,32 @@ fun SettingsScreen(onBack: () -> Unit) {
             ) {
                 Text("Fetch August Lock IDs")
             }
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
+            Text("Buddy AI (OpenAI)", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Buddy uses ChatGPT to reply to you. Get a key at platform.openai.com",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = openAiKey,
+                onValueChange = { openAiKey = it },
+                label = { Text("OpenAI API Key (sk-…)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = bridgeHost,
+                onValueChange = { bridgeHost = it },
+                label = { Text("Windows Buddy IP (e.g. 192.168.1.10)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
             Spacer(Modifier.height(24.dp))
             Button(
                 onClick = {
@@ -484,6 +516,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                             seamEnabled = seamEnabled,
                             seamApiKey = seamApiKey,
                             seamDeviceId = seamDeviceId,
+                            openAiKey = openAiKey,
+                            bridgeHost = bridgeHost,
                             onBack = onBack,
                         )
                     }
@@ -514,6 +548,8 @@ private fun persistAndBack(
     seamEnabled: Boolean,
     seamApiKey: String,
     seamDeviceId: String,
+    openAiKey: String = "",
+    bridgeHost: String = "",
     onBack: () -> Unit,
 ) {
     scope.launch {
@@ -536,6 +572,8 @@ private fun persistAndBack(
                 seamApiKey,
                 seamDeviceId,
             )
+            DoorPrefs.setOpenAiKey(context, openAiKey)
+            DoorPrefs.setBridgeHost(context, bridgeHost)
             DoorShortcut.refresh(context)
             Toast.makeText(context, R.string.saved, Toast.LENGTH_SHORT).show()
             onBack()

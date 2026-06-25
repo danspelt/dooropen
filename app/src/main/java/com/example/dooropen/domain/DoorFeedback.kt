@@ -93,6 +93,52 @@ object DoorFeedback {
         playTone(ctx, ToneGenerator.TONE_PROP_ACK, 160, 80)
     }
 
+    // --- Buddy voice mode feedback ---
+
+    fun buddyHeard(context: Context) {
+        val ctx = context.applicationContext
+        vibrateShort(ctx, 35L)
+        playTone(ctx, ToneGenerator.TONE_PROP_BEEP2, 80, 85)
+    }
+
+    fun buddySpeakOpening(context: Context) {
+        val ctx = context.applicationContext
+        if (DoorPrefs.getSoundEnabled(ctx)) speak(ctx, "Opening door.")
+    }
+
+    fun buddySpeakCommandSent(context: Context) {
+        val ctx = context.applicationContext
+        if (DoorPrefs.getSoundEnabled(ctx)) {
+            speak(ctx, "Door command sent.")
+        }
+        vibratePattern(ctx, longArrayOf(0, 40, 60, 40))
+        playTone(ctx, ToneGenerator.TONE_PROP_ACK, 180, 85)
+    }
+
+    fun buddySpeakFailure(context: Context, reason: BuddyFailReason) {
+        val ctx = context.applicationContext
+        val text = when (reason) {
+            BuddyFailReason.UNREACHABLE  -> "I could not reach the door."
+            BuddyFailReason.OFFLINE      -> "I'm offline. I can't open the door."
+            BuddyFailReason.TIMEOUT      -> "The door command timed out."
+            BuddyFailReason.ASSIST_OFF   -> "Door Assist is off."
+            BuddyFailReason.NOT_READY    -> "Buddy is not ready."
+        }
+        if (DoorPrefs.getSoundEnabled(ctx)) speak(ctx, text)
+        vibratePattern(ctx, longArrayOf(0, 80, 0, 0))
+        playTone(ctx, ToneGenerator.TONE_PROP_NACK, 260, 85)
+        playTone(ctx, ToneGenerator.TONE_PROP_NACK, 260, 85)
+    }
+
+    fun buddySpeakCooldown(context: Context) {
+        val ctx = context.applicationContext
+        if (DoorPrefs.getSoundEnabled(ctx)) speak(ctx, "Door command already sent.")
+        vibrateShort(ctx, 30L)
+        playTone(ctx, ToneGenerator.TONE_PROP_BEEP, 60, 60)
+    }
+
+    enum class BuddyFailReason { UNREACHABLE, OFFLINE, TIMEOUT, ASSIST_OFF, NOT_READY }
+
     fun playFailure(context: Context, reason: String? = null) {
         val ctx = context.applicationContext
         vibratePattern(ctx, longArrayOf(0, 60, 80, 60))
@@ -110,6 +156,11 @@ object DoorFeedback {
             val message = reason ?: "Cannot open door"
             speak(ctx, message)
         }
+    }
+
+    /** Speak unconditionally — ignores sound pref. Used by Buddy AI replies. */
+    fun speak(context: Context, text: String) {
+        speak(context.applicationContext, text, {})
     }
 
     fun speakStatus(context: Context, status: String) {

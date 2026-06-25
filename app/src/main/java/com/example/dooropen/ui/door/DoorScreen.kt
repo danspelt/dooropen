@@ -1,7 +1,13 @@
 package com.example.dooropen.ui.door
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -56,6 +63,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.dooropen.R
+import com.example.dooropen.buddy.BuddyPermissions
+import com.example.dooropen.buddy.BuddyVoiceService
 import com.example.dooropen.data.DoorPrefs
 import com.example.dooropen.domain.DeviceStatus
 import com.example.dooropen.domain.DoorCommand
@@ -118,13 +127,35 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
     var deviceStatus by remember { mutableStateOf<DeviceStatus.State>(DeviceStatus.State.Unknown) }
     var proximityState by remember { mutableStateOf<ProximityMonitor.ProximityState>(ProximityMonitor.ProximityState.Unknown) }
     var autoOpenEnabled by remember { mutableStateOf(false) }
+    var buddyEnabled by remember { mutableStateOf(false) }
     var bleBattery by remember { mutableStateOf<Int?>(null) }
     var bleDebugLines by remember { mutableStateOf<List<String>>(emptyList()) }
     val focusRequester = remember { FocusRequester() }
+    val phoneFocusRequester = remember { FocusRequester() }
 
-    // Load auto-open preference
+    // Load preferences
     LaunchedEffect(Unit) {
         autoOpenEnabled = DoorPrefs.getAutoOpenEnabled(context)
+        try { buddyEnabled = DoorPrefs.getBuddyEnabled(context) } catch (_: Exception) {}
+    }
+
+    val buddyPermissions = BuddyPermissions.ALL
+
+    val buddyPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        if (BuddyPermissions.hasMic(context)) {
+            BuddyVoiceService.start(context)
+        }
+    }
+
+    // If Buddy was already ON (e.g. after update), prompt for any missing permissions.
+    LaunchedEffect(buddyEnabled) {
+        if (!buddyEnabled) return@LaunchedEffect
+        val missing = BuddyPermissions.missing(context, BuddyPermissions.ALL)
+        if (missing.isNotEmpty()) {
+            buddyPermissionLauncher.launch(missing)
+        }
     }
 
     // Initialize TTS
@@ -245,8 +276,9 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Button(
@@ -318,6 +350,19 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
         }
+
+        // Headset — right below OPEN DOOR for Switch Access scan order
+        Spacer(modifier = Modifier.height(20.dp))
+        HeadsetControlSection(
+            buddyEnabled = buddyEnabled,
+            onRequestBuddyOn = {
+                buddyEnabled = true
+                DoorPrefs.setBuddyEnabled(context, true)
+                BuddyVoiceService.start(context)
+            },
+            phoneFocusRequester = phoneFocusRequester,
+        )
+
         // Connection status indicator
         Row(
             modifier = Modifier
@@ -444,6 +489,51 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
                     },
                 )
             }
+        }
+
+        // Buddy voice mode toggle
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.NearMe,
+                contentDescription = "Buddy voice",
+                tint = if (buddyEnabled) Color(0xFFFFD700) else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(modifier = Modifier.padding(horizontal = 8.dp))
+            Text(
+                text = if (buddyEnabled) "Buddy ON  \"Buddy, open door\"" else "Buddy OFF",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (buddyEnabled) Color(0xFFFFD700) else MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.padding(horizontal = 8.dp))
+            Switch(
+                checked = buddyEnabled,
+                modifier = Modifier.semantics {
+                    contentDescription = if (buddyEnabled) "Buddy on" else "Buddy off"
+                    role = Role.Switch
+                },
+                onCheckedChange = { on ->
+                    if (on) {
+                        buddyEnabled = true
+                        DoorPrefs.setBuddyEnabled(context, true)
+                        val missing = BuddyPermissions.missing(context, BuddyPermissions.ALL)
+                        if (missing.isEmpty()) {
+                            BuddyVoiceService.start(context)
+                        } else {
+                            buddyPermissionLauncher.launch(missing)
+                        }
+                    } else {
+                        buddyEnabled = false
+                        DoorPrefs.setBuddyEnabled(context, false)
+                        BuddyVoiceService.stop(context)
+                    }
+                },
+            )
         }
 
         // Bot location note
@@ -609,9 +699,9 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
             // Estimated distance in feet + raw dBm for calibration
             if (displayRssi != null) {
                 val estimatedFeet = when {
-                    displayRssi >= -68 -> "~at door"
-                    displayRssi >= -78 -> "~5 ft"
-                    displayRssi >= -88 -> "~10 ft"
+                    displayRssi >= -72 -> "~at door"
+                    displayRssi >= -82 -> "~5 ft"
+                    displayRssi >= -90 -> "~10 ft"
                     else -> "~15+ ft"
                 }
                 Text(

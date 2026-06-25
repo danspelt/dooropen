@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Door Assist</string>
+    <string name="app_name">Buddy</string>
     <string name="open_door_label">OPEN DOOR</string>
     <string name="status_ready">Ready</string>
     <string name="status_opening">Opening…</string>
@@ -9,7 +9,7 @@
     <string name="a11y_opening">Door opening</string>
     <string name="cd_open_door_button">Open door</string>
     <string name="cd_settings">Settings</string>
-    <string name="settings_title">Settings</string>
+    <string name="settings_title">Buddy Settings</string>
     <string name="back">Back</string>
     <string name="settings_intro_short">Enter your SwitchBot credentials below. Tap ❓ for step-by-step help.</string>
     <string name="help_title">How to get your credentials</string>
@@ -58,7 +58,7 @@
     <string name="open_bad_key">Wrong trigger key</string>
     <string name="open_error_prefs">Could not read secure settings</string>
     <string name="shortcut_open_door_short">Open door</string>
-    <string name="shortcut_open_door_long">Send SwitchBot press</string>
+    <string name="shortcut_open_door_long">Buddy: open door</string>
     <string name="blocked_keyguard">Unlock your phone first.</string>
     <string name="blocked_location_permission">Location permission is required for home Wi‑Fi check.</string>
     <string name="blocked_ssid_unknown">Could not read Wi‑Fi name. Turn Wi‑Fi on and grant location access.</string>
@@ -70,4 +70,20 @@
     <string name="blocked_cooldown">Wait %1$d s before opening again.</string>
     <string name="blocked_not_configured">Open Settings and save your SwitchBot credentials.</string>
     <string name="blocked_ble_missing_mac">Bluetooth mode is on. Enter the Bot MAC address in Settings.</string>
+    <string name="headset_control_title">Headset Control</string>
+    <string name="headset_turn_buddy_on">Turn Buddy on to use headset buttons</string>
+    <string name="headset_busy">Please wait</string>
+    <string name="headset_not_connected">Computer not connected. Check Windows Buddy IP in Settings.</string>
+    <string name="headset_on_phone">Headset on phone</string>
+    <string name="headset_on_computer">Headset on computer</string>
+    <string name="headset_phone_button">PHONE</string>
+    <string name="headset_phone_subtitle">Move headset to my phone</string>
+    <string name="headset_computer_button">COMPUTER</string>
+    <string name="headset_computer_subtitle">Move headset to my computer</string>
+    <string name="headset_moving_phone">Moving headset to phone</string>
+    <string name="headset_moved_phone">Headset moved to phone</string>
+    <string name="headset_moving_computer">Moving headset to computer</string>
+    <string name="headset_moved_computer">Headset moved to computer</string>
+    <string name="cd_headset_phone">Phone. Move headset to my phone.</string>
+    <string name="cd_headset_computer">Computer. Move headset to my computer.</string>
 </resources>

@@ -1,0 +1,17 @@
+{
+  "name": "buddy-windows",
+  "version": "1.0.0",
+  "description": "Buddy Windows agent — headset switching and phone bridge",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "speech": "node -e \"process.env.BUDDY_SPEECH='1'; require('./src/index.js')\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

@@ -28,6 +28,9 @@ object DoorPrefs {
     private const val K_SEAM_ENABLED = "seam_enabled"
     private const val K_SEAM_API_KEY = "seam_api_key"
     private const val K_SEAM_DEVICE_ID = "seam_device_id"
+    private const val K_BUDDY_ENABLED = "buddy_voice_enabled"
+    private const val K_OPENAI_KEY = "openai_api_key"
+    private const val K_BRIDGE_HOST = "bridge_host"
 
     private fun prefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
@@ -144,6 +147,27 @@ object DoorPrefs {
             .putString(K_SEAM_API_KEY, seamApiKey.trim())
             .putString(K_SEAM_DEVICE_ID, seamDeviceId.trim())
             .apply()
+    }
+
+    @Throws(GeneralSecurityException::class, IOException::class)
+    fun getBuddyEnabled(context: Context) = prefs(context).getBoolean(K_BUDDY_ENABLED, false)
+
+    fun setBuddyEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(K_BUDDY_ENABLED, enabled).apply()
+    }
+
+    @Throws(GeneralSecurityException::class, IOException::class)
+    fun getOpenAiKey(context: Context) = prefs(context).getString(K_OPENAI_KEY, "").orEmpty().trim()
+
+    fun setOpenAiKey(context: Context, key: String) {
+        prefs(context).edit().putString(K_OPENAI_KEY, key.trim()).apply()
+    }
+
+    @Throws(GeneralSecurityException::class, IOException::class)
+    fun getBridgeHost(context: Context) = prefs(context).getString(K_BRIDGE_HOST, "192.168.1.207").orEmpty().trim()
+
+    fun setBridgeHost(context: Context, host: String) {
+        prefs(context).edit().putString(K_BRIDGE_HOST, host.trim()).apply()
     }
 
     fun setAutoOpenEnabled(context: Context, enabled: Boolean) {

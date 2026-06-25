@@ -54,12 +54,28 @@ object ProximityMonitor {
     private var hasAnnouncedVeryNear = false
     private var hasAnnouncedNear = false
 
-    // RSSI thresholds calibrated for this specific door (bot on top, user reads ~-67 dBm at door)
+    // RSSI thresholds calibrated for this specific door (bot on top)
+    // Measured: outside at door = -71 dBm, inside = -68 dBm
     // Closer = higher number: -30 touching, -100 very far
-    private const val VERY_NEAR_THRESHOLD = -68  // at the door (~-67 dBm measured)
-    private const val NEAR_THRESHOLD = -78       // ~5 feet away
-    private const val FAR_THRESHOLD = -88        // ~10+ feet away
+    // VeryNear set to -72 to catch -71 outside; inside false-triggers are prevented
+    // by requiring VERY_NEAR_CONSECUTIVE_REQUIRED sustained hits before auto-opening.
+    private const val VERY_NEAR_THRESHOLD = -72  // catches -71 dBm at the door outside
+    private const val NEAR_THRESHOLD = -82       // ~5 ft away
+    private const val FAR_THRESHOLD = -90        // ~10+ ft away
     private const val ANNOUNCE_COOLDOWN_MS = 8000  // Don't announce more than every 8 seconds
+
+    // Number of consecutive VeryNear scan hits required before auto-open fires.
+    // Inside the house you may get 1-2 hits while walking past; outside you stop and hold.
+    private const val VERY_NEAR_CONSECUTIVE_REQUIRED = 3
+    private var veryNearConsecutiveCount = 0
+
+    // When true (set by ProximityService), run a continuous scan instead of stop/restart loop.
+    // The stop/restart loop uses Handler(mainLooper) which Doze can throttle with screen off.
+    private var backgroundMode = false
+
+    fun setBackgroundMode(enabled: Boolean) {
+        backgroundMode = enabled
+    }
 
     fun setAutoOpenEnabled(enabled: Boolean) {
         autoOpenEnabled = enabled
@@ -70,6 +86,9 @@ object ProximityMonitor {
     }
 
     fun startMonitoring(context: Context) {
+        // Stop any existing scan first so repeated watchdog calls don't leak callbacks
+        if (scanCallback != null) stopMonitoring(context)
+
         if (!DoorPrefs.getBleEnabled(context)) {
             _state.value = ProximityState.Error("Bluetooth mode not enabled")
             return
@@ -193,19 +212,24 @@ object ProximityMonitor {
             }
         }
 
+        val scanMode = if (backgroundMode) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_LOW_LATENCY
         val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setScanMode(scanMode)
             .build()
 
         try {
             scanner.startScan(null, settings, scanCallback)
-            // Stop scan after 10 seconds to save battery, then restart
-            handler.postDelayed({
-                stopMonitoring(context)
+            if (!backgroundMode) {
+                // Foreground: stop/restart cycle to save battery
                 handler.postDelayed({
-                    startMonitoring(context)
-                }, 2000)
-            }, 10000)
+                    stopMonitoring(context)
+                    handler.postDelayed({
+                        startMonitoring(context)
+                    }, 2000)
+                }, 10000)
+            }
+            // Background mode: scan runs continuously — the service manages its own lifecycle.
+            // Continuous scanning avoids the Handler/mainLooper being throttled by Doze.
         } catch (_: Exception) {
             _state.value = ProximityState.Error("Cannot start scan")
         }
@@ -216,10 +240,14 @@ object ProximityMonitor {
 
         when {
             rssi >= VERY_NEAR_THRESHOLD -> {
+                veryNearConsecutiveCount++
                 _state.value = ProximityState.VeryNear(rssi, deviceName)
 
-                // Auto-open trigger when very close - fire immediately, respect cooldown
-                if (autoOpenEnabled && now - lastAutoOpenTime > AUTO_OPEN_COOLDOWN_MS) {
+                // Only fire auto-open after sustained consecutive hits to avoid inside false-triggers
+                if (autoOpenEnabled
+                    && veryNearConsecutiveCount >= VERY_NEAR_CONSECUTIVE_REQUIRED
+                    && now - lastAutoOpenTime > AUTO_OPEN_COOLDOWN_MS
+                ) {
                     lastAutoOpenTime = now
                     autoOpenCallback?.onAutoOpenTrigger()
                 }
@@ -232,6 +260,7 @@ object ProximityMonitor {
                 }
             }
             rssi >= NEAR_THRESHOLD -> {
+                veryNearConsecutiveCount = 0
                 _state.value = ProximityState.Near(rssi, deviceName)
                 if (!hasAnnouncedNear && !hasAnnouncedVeryNear) {
                     hasAnnouncedNear = true
@@ -239,11 +268,13 @@ object ProximityMonitor {
                 }
             }
             rssi >= FAR_THRESHOLD -> {
+                veryNearConsecutiveCount = 0
                 _state.value = ProximityState.Far(rssi)
                 hasAnnouncedNear = false
                 hasAnnouncedVeryNear = false
             }
             else -> {
+                veryNearConsecutiveCount = 0
                 _state.value = ProximityState.NotDetected
                 hasAnnouncedNear = false
                 hasAnnouncedVeryNear = false

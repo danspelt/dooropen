@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Buddy Headset Control</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e8eef7;
+      --muted: #8b9cb3;
+      --phone: #3b82f6;
+      --phone-hover: #2563eb;
+      --computer: #10b981;
+      --computer-hover: #059669;
+      --border: #2d3a4f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(circle at top, #1e293b 0%, var(--bg) 55%);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(480px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+    .subtitle {
+      color: var(--muted);
+      margin: 0 0 24px;
+      font-size: 0.95rem;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #111827;
+      color: var(--text);
+      font-size: 1rem;
+      margin-bottom: 20px;
+    }
+    .status-box {
+      background: #111827;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 24px;
+    }
+    .status-label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .status-value {
+      margin-top: 6px;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .status-detail {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .buttons {
+      display: grid;
+      gap: 14px;
+    }
+    button {
+      border: none;
+      border-radius: 14px;
+      padding: 22px 20px;
+      cursor: pointer;
+      text-align: left;
+      transition: transform 0.12s ease, filter 0.12s ease;
+    }
+    button:active { transform: scale(0.98); }
+    button:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+    .btn-title {
+      display: block;
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+    .btn-desc {
+      display: block;
+      margin-top: 6px;
+      font-size: 0.92rem;
+      opacity: 0.9;
+    }
+    .phone-btn {
+      background: linear-gradient(135deg, var(--phone), #1d4ed8);
+      color: white;
+    }
+    .phone-btn:hover:not(:disabled) { filter: brightness(1.06); }
+    .computer-btn {
+      background: linear-gradient(135deg, var(--computer), #047857);
+      color: white;
+    }
+    .computer-btn:hover:not(:disabled) { filter: brightness(1.06); }
+    .error {
+      color: #f87171;
+      margin-top: 12px;
+      font-size: 0.9rem;
+      min-height: 1.2em;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Buddy Headset Control</h1>
+    <p class="subtitle">Windows lets go → phone picks up. Windows grabs back → headset on PC.</p>
+
+    <label for="headset">Current headset</label>
+    <select id="headset">
+      <option value="">Loading headsets…</option>
+    </select>
+
+    <div class="status-box">
+      <div class="status-label">Status</div>
+      <div class="status-value" id="statusLabel">Checking…</div>
+      <div class="status-detail" id="statusDetail"></div>
+      <div class="status-detail" id="statusError" style="color:#f87171;margin-top:8px;"></div>
+    </div>
+
+    <div class="buttons">
+      <button class="phone-btn" id="phoneBtn" type="button">
+        <span class="btn-title">PHONE</span>
+        <span class="btn-desc">Move headset to my phone</span>
+      </button>
+      <button class="computer-btn" id="computerBtn" type="button">
+        <span class="btn-title">COMPUTER</span>
+        <span class="btn-desc">Move headset to my computer</span>
+      </button>
+    </div>
+
+    <div class="error" id="error"></div>
+  </main>
+
+  <script>
+    const headsetSelect = document.getElementById("headset");
+    const statusLabel = document.getElementById("statusLabel");
+    const statusDetail = document.getElementById("statusDetail");
+    const statusError = document.getElementById("statusError");
+    const errorEl = document.getElementById("error");
+    const phoneBtn = document.getElementById("phoneBtn");
+    const computerBtn = document.getElementById("computerBtn");
+
+    async function api(path, options) {
+      const res = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function setBusy(busy) {
+      phoneBtn.disabled = busy;
+      computerBtn.disabled = busy;
+    }
+
+    async function refreshStatus() {
+      const data = await api("/api/status");
+      statusLabel.textContent = data.statusLabel || "Ready";
+      statusDetail.textContent = data.status || data.detail || "";
+      statusError.textContent = "";
+    }
+
+    async function loadHeadsets() {
+      const data = await api("/api/headsets");
+      const list = data.headsets || [];
+      headsetSelect.innerHTML = "";
+
+      if (list.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No headsets found — pair one in Windows Bluetooth";
+        headsetSelect.appendChild(opt);
+        return;
+      }
+
+      list.forEach((item) => {
+        const opt = document.createElement("option");
+        opt.value = item.name;
+        opt.textContent = item.name;
+        headsetSelect.appendChild(opt);
+      });
+
+      const status = await api("/api/status");
+      if (status.selectedHeadset) {
+        headsetSelect.value = status.selectedHeadset;
+      }
+    }
+
+    headsetSelect.addEventListener("change", async () => {
+      errorEl.textContent = "";
+      try {
+        await api("/api/select", {
+          method: "POST",
+          body: JSON.stringify({ name: headsetSelect.value }),
+        });
+      } catch (err) {
+        errorEl.textContent = err.message;
+      }
+    });
+
+    async function switchTo(target) {
+      errorEl.textContent = "";
+      statusError.textContent = "";
+      setBusy(true);
+      try {
+        const data = await api("/api/switch", {
+          method: "POST",
+          body: JSON.stringify({ target }),
+        });
+        statusLabel.textContent = data.statusLabel || (target === "phone" ? "Headset moved to phone" : "Headset moved to computer");
+        statusDetail.textContent = data.status || data.message || data.detail || "";
+      } catch (err) {
+        errorEl.textContent = err.message;
+        statusError.textContent = err.message;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    phoneBtn.addEventListener("click", () => switchTo("phone"));
+    computerBtn.addEventListener("click", () => switchTo("computer"));
+
+    loadHeadsets()
+      .then(refreshStatus)
+      .catch((err) => {
+        errorEl.textContent = err.message;
+        statusLabel.textContent = "Could not load";
+      });
+  </script>
+</body>
+</html>
