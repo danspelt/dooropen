@@ -49,11 +49,36 @@ class BuddyVoiceService : Service() {
     private var conversationTimeoutRunnable: Runnable? = null
     private val CONVERSATION_TIMEOUT_MS = 30_000L
 
-    private val GREETING_WORDS = listOf("hi buddy", "hey buddy", "hello buddy", "ok buddy", "okay buddy")
-    private val MODE_COMPUTER = listOf("buddy computer", "buddy, computer")
-    private val MODE_PHONE = listOf("buddy phone", "buddy, phone")
-    private val CALL_PREFIX = listOf("buddy call", "buddy, call")
-    private val HANG_UP = listOf("buddy hang up", "buddy, hang up")
+    private val GREETING_WORDS = listOf(
+        "hi buddy", "hey buddy", "hello buddy", "ok buddy", "okay buddy",
+        "hi body", "hey body", "hello body", "hi bud", "hey bud"
+    )
+    // Computer mode — broad matching for CP speech variants
+    private val MODE_COMPUTER = listOf(
+        "buddy computer", "buddy, computer",
+        "body computer", "but he computer",
+        "headset computer", "headset to computer",
+        "switch computer", "switch to computer",
+        "move computer", "move to computer",
+        "computer mode", "use computer",
+        "buddy headset computer", "buddy switch computer"
+    )
+    // Phone mode — broad matching for CP speech variants
+    private val MODE_PHONE = listOf(
+        "buddy phone", "buddy, phone",
+        "body phone", "but he phone",
+        "headset phone", "headset to phone",
+        "switch phone", "switch to phone",
+        "move phone", "move to phone",
+        "phone mode", "use phone",
+        "buddy headset phone", "buddy switch phone"
+    )
+    private val CALL_PREFIX = listOf("buddy call", "buddy, call", "body call", "call")
+    private val HANG_UP = listOf(
+        "buddy hang up", "buddy, hang up",
+        "hang up", "hangup", "end call", "buddy end call",
+        "body hang up", "buddy hang"
+    )
 
     override fun onCreate() {
         super.onCreate()

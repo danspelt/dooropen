@@ -89,12 +89,13 @@ object ProximityMonitor {
         // Stop any existing scan first so repeated watchdog calls don't leak callbacks
         if (scanCallback != null) stopMonitoring(context)
 
-        if (!DoorPrefs.getBleEnabled(context)) {
+        val bleOn = try { DoorPrefs.getBleEnabled(context) } catch (_: Exception) { false }
+        if (!bleOn) {
             _state.value = ProximityState.Error("Bluetooth mode not enabled")
             return
         }
 
-        val mac = DoorPrefs.getBleMac(context)
+        val mac = try { DoorPrefs.getBleMac(context) } catch (_: Exception) { "" }
         if (mac.isBlank()) {
             _state.value = ProximityState.Error("Bluetooth MAC not configured")
             return

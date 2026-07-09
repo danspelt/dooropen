@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
 
@@ -32,7 +33,7 @@ object DoorPrefs {
     private const val K_OPENAI_KEY = "openai_api_key"
     private const val K_BRIDGE_HOST = "bridge_host"
 
-    private fun prefs(context: Context): SharedPreferences {
+    private fun buildPrefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -43,6 +44,24 @@ object DoorPrefs {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
+    }
+
+    private fun prefs(context: Context): SharedPreferences {
+        return try {
+            buildPrefs(context)
+        } catch (e: Exception) {
+            // Encrypted prefs/key out of sync (e.g. after reinstall). Wipe and recreate.
+            try {
+                context.deleteSharedPreferences(FILE)
+            } catch (_: Exception) {
+                // Older devices: delete the underlying file directly
+                try {
+                    val dir = context.applicationContext.filesDir.parentFile
+                    File(dir, "shared_prefs/$FILE.xml").delete()
+                } catch (_: Exception) {}
+            }
+            buildPrefs(context)
+        }
     }
 
     @Throws(GeneralSecurityException::class, IOException::class)
@@ -94,7 +113,7 @@ object DoorPrefs {
     fun getVibrationEnabled(context: Context) = prefs(context).getBoolean(K_VIBRATION, true)
 
     @Throws(GeneralSecurityException::class, IOException::class)
-    fun getAutoOpenEnabled(context: Context) = prefs(context).getBoolean(K_AUTO_OPEN, false)
+    fun getAutoOpenEnabled(context: Context) = prefs(context).getBoolean(K_AUTO_OPEN, true)
 
     @Throws(GeneralSecurityException::class, IOException::class)
     fun getSeamEnabled(context: Context) = prefs(context).getBoolean(K_SEAM_ENABLED, false)

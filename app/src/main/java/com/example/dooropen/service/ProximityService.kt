@@ -46,17 +46,18 @@ class ProximityService : Service() {
         // that Android Doze would throttle with the screen off.
         ProximityMonitor.setBackgroundMode(true)
 
-        // Restore auto-open preference so it works even if app was never opened
-        try {
-            val autoOpen = com.example.dooropen.data.DoorPrefs.getAutoOpenEnabled(this)
-            ProximityMonitor.setAutoOpenEnabled(autoOpen)
-        } catch (_: Exception) {}
+        // Restore auto-open preference — default true so driving to door always works
+        val autoOpen = try {
+            com.example.dooropen.data.DoorPrefs.getAutoOpenEnabled(this)
+        } catch (_: Exception) { true }
+        ProximityMonitor.setAutoOpenEnabled(autoOpen)
 
         ProximityMonitor.setAutoOpenCallback(object : ProximityMonitor.AutoOpenCallback {
             override fun onAutoOpenTrigger() {
                 scope.launch {
                     val blocked = DoorCommand.evaluate(applicationContext)
                     if (blocked == null) {
+                        DoorFeedback.speak(applicationContext, "Opening door automatically")
                         DoorFeedback.playSuccess(applicationContext)
                         DoorCommand.commitPress(applicationContext)
                     }
@@ -103,10 +104,13 @@ class ProximityService : Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Buddy Auto-Open",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_MIN   // lowest — no status bar icon
         ).apply {
-            description = "Buddy monitors Bluetooth proximity to auto-open the door"
+            description = "Buddy monitors proximity to auto-open the door"
             setShowBadge(false)
+            setSound(null, null)
+            enableLights(false)
+            enableVibration(false)
         }
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(channel)
@@ -127,6 +131,8 @@ class ProximityService : Service() {
             .setContentIntent(pi)
             .setOngoing(true)
             .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .build()
     }
 

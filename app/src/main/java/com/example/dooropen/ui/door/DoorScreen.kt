@@ -63,6 +63,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.dooropen.R
+import com.example.dooropen.buddy.BuddyBridge
 import com.example.dooropen.buddy.BuddyPermissions
 import com.example.dooropen.buddy.BuddyVoiceService
 import com.example.dooropen.data.DoorPrefs
@@ -128,6 +129,9 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
     var proximityState by remember { mutableStateOf<ProximityMonitor.ProximityState>(ProximityMonitor.ProximityState.Unknown) }
     var autoOpenEnabled by remember { mutableStateOf(false) }
     var buddyEnabled by remember { mutableStateOf(false) }
+    var buddyConnected by remember { mutableStateOf(false) }
+    var headsetStatus by remember { mutableStateOf("") }
+    var bleEnabled by remember { mutableStateOf(false) }
     var bleBattery by remember { mutableStateOf<Int?>(null) }
     var bleDebugLines by remember { mutableStateOf<List<String>>(emptyList()) }
     val focusRequester = remember { FocusRequester() }
@@ -135,8 +139,9 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
 
     // Load preferences
     LaunchedEffect(Unit) {
-        autoOpenEnabled = DoorPrefs.getAutoOpenEnabled(context)
+        try { autoOpenEnabled = DoorPrefs.getAutoOpenEnabled(context) } catch (_: Exception) {}
         try { buddyEnabled = DoorPrefs.getBuddyEnabled(context) } catch (_: Exception) {}
+        try { bleEnabled = DoorPrefs.getBleEnabled(context) } catch (_: Exception) {}
     }
 
     val buddyPermissions = BuddyPermissions.ALL
@@ -146,6 +151,14 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
     ) { _ ->
         if (BuddyPermissions.hasMic(context)) {
             BuddyVoiceService.start(context)
+        }
+    }
+
+    // Poll BuddyBridge connection state every second
+    LaunchedEffect(Unit) {
+        while (true) {
+            buddyConnected = BuddyBridge.isConnected
+            delay(1000L)
         }
     }
 
@@ -181,69 +194,23 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
         }
     }
 
-    // Start proximity monitoring when BLE is enabled
-    LaunchedEffect(deviceStatus) {
-        if (deviceStatus is DeviceStatus.State.Connected && DoorPrefs.getBleEnabled(context)) {
-            // Set up auto-open callback
-            ProximityMonitor.setAutoOpenCallback(object : ProximityMonitor.AutoOpenCallback {
-                override fun onAutoOpenTrigger() {
-                    scope.launch {
-                        // Safety check before auto-open
-                        val blocked = DoorCommand.evaluate(context)
-                        if (blocked != null) {
-                            DoorFeedback.playBlockedWarning(context, blocked.message)
-                            return@launch
-                        }
+    // Ensure ProximityService is running when BLE is configured
+    LaunchedEffect(bleEnabled) {
+        if (bleEnabled) {
+            try { ProximityService.start(context) } catch (_: Exception) {}
+        }
+    }
 
-                        DoorFeedback.speakStatus(context, "Opening door automatically")
-                        DoorFeedback.playOpeningCue(context)
-                        phase = DoorPhase.Opening
-
-                        when (val r = DoorCommand.commitPress(context)) {
-                            is DoorCommand.PressOutcome.Success -> {
-                                phase = DoorPhase.Done
-                                DoorFeedback.playSuccess(context)
-                            }
-                            is DoorCommand.PressOutcome.Failed -> {
-                                failureDetail = r.message
-                                phase = DoorPhase.Failed
-                                DoorFeedback.playFailure(context, r.message)
-                                DeviceStatus.invalidateCache()
-                                deviceStatus = DeviceStatus.check(context)
-                            }
-                        }
-                    }
-                }
-            })
-            ProximityMonitor.setAutoOpenEnabled(autoOpenEnabled)
-
-            ProximityMonitor.startMonitoring(context)
-            // Collect BLE battery level from advertisement data
-            scope.launch {
-                ProximityMonitor.battery.collect { batt -> bleBattery = batt }
-            }
-            // Collect raw BLE debug data for on-screen display
-            scope.launch {
-                ProximityMonitor.bleDebug.collect { lines -> bleDebugLines = lines }
-            }
-            // Collect proximity state changes
-            ProximityMonitor.state.collect { state ->
-                proximityState = state
-
-                // Announce when near (but not too often)
-                if (ProximityMonitor.shouldAnnounce()) {
-                    val message = ProximityMonitor.getAnnounceMessage()
-                    if (message != null) {
-                        DoorFeedback.speakStatus(context, message)
-                        ProximityMonitor.markAnnounced()
-                    }
-                }
-            }
-        } else {
-            ProximityMonitor.stopMonitoring(context)
-            ProximityMonitor.setAutoOpenCallback(null)
-            ProximityMonitor.setAutoOpenEnabled(false)
-            proximityState = ProximityMonitor.ProximityState.Unknown
+    // Observe proximity state from the monitor (Service owns the scan & callback)
+    LaunchedEffect(Unit) {
+        scope.launch {
+            ProximityMonitor.battery.collect { batt -> bleBattery = batt }
+        }
+        scope.launch {
+            ProximityMonitor.bleDebug.collect { lines -> bleDebugLines = lines }
+        }
+        ProximityMonitor.state.collect { state ->
+            proximityState = state
         }
     }
 
@@ -258,7 +225,7 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
     val statusText = when (phase) {
         DoorPhase.Ready -> {
             // Always show proximity status when BLE is enabled
-            if (DoorPrefs.getBleEnabled(context) && proximityState !is ProximityMonitor.ProximityState.Unknown) {
+            if (bleEnabled && proximityState !is ProximityMonitor.ProximityState.Unknown) {
                 proximityState.toDisplayText()
             } else {
                 deviceStatus.toDisplayText()
@@ -454,7 +421,7 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
         }
 
         // Auto-open toggle (only when BLE is enabled)
-        if (DoorPrefs.getBleEnabled(context)) {
+        if (bleEnabled) {
             Spacer(modifier = Modifier.height(16.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -536,8 +503,89 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
             )
         }
 
+        // ── Headset Switch Buttons ──────────────────────────────────────────
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Connection status chip
+        val chipColor = if (buddyConnected) Color(0xFF22c55e) else Color(0xFFef4444)
+        val chipText  = if (buddyConnected) "● Computer connected" else "● Computer not connected"
+        Text(
+            text = chipText,
+            style = MaterialTheme.typography.labelMedium,
+            color = chipColor,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // HEADSET → COMPUTER  (big, always visible)
+        Button(
+            onClick = {
+                headsetStatus = "Switching to computer…"
+                BuddyBridge.sendHeadsetSwitch("computer", context)
+                try { DoorFeedback.speak(context, "Switching headset to computer.") } catch (_: Exception) {}
+                headsetStatus = "Headset → Computer sent"
+            },
+            enabled = buddyConnected,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .semantics { contentDescription = "Move headset to computer" },
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF15803d),
+                disabledContainerColor = Color(0xFF374151),
+            ),
+        ) {
+            Text(
+                text = "🎧  HEADSET → COMPUTER",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // HEADSET → PHONE  (big, always visible)
+        Button(
+            onClick = {
+                headsetStatus = "Switching to phone…"
+                BuddyBridge.sendHeadsetSwitch("phone", context)
+                try { DoorFeedback.speak(context, "Switching headset to phone.") } catch (_: Exception) {}
+                headsetStatus = "Headset → Phone sent"
+            },
+            enabled = buddyConnected,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .semantics { contentDescription = "Move headset to phone" },
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFb45309),
+                disabledContainerColor = Color(0xFF374151),
+            ),
+        ) {
+            Text(
+                text = "📱  HEADSET → PHONE",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+            )
+        }
+
+        if (headsetStatus.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = headsetStatus,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF94a3b8),
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
+        }
+
         // Bot location note
-        if (DoorPrefs.getBleEnabled(context)) {
+        if (bleEnabled) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Bot is on top of the door",
@@ -548,7 +596,7 @@ fun DoorScreen(onOpenSettings: () -> Unit) {
         }
 
         // Proximity indicator - always show when BLE is enabled
-        if (DoorPrefs.getBleEnabled(context)) {
+        if (bleEnabled) {
             Spacer(modifier = Modifier.height(12.dp))
 
             // Show distance indicator even when unknown/scanning
